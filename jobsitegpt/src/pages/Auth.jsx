@@ -26,7 +26,7 @@ export default function Auth() {
     const { error: authError } = await supabase.auth.signInWithOtp({
       email: email.trim(),
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: "https://jobsitegpt.vercel.app",
         data: { beta_code: code.toUpperCase().trim() },
       },
     });
