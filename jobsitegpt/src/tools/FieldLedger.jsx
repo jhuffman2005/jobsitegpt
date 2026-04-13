@@ -20,7 +20,7 @@ function load(key, fallback) {
   catch { return fallback; }
 }
 
-export default function FieldLedger() {
+export default function FieldLedger({ activeProject }) {
   const [jobs, setJobs] = useState(() => load("fl_jobs", []));
   const [entries, setEntries] = useState(() => load("fl_entries", []));
   const [payments, setPayments] = useState(() => load("fl_payments", []));
@@ -31,11 +31,8 @@ export default function FieldLedger() {
   const [showNewJob, setShowNewJob] = useState(false);
   const [toast, showToast] = useToast();
 
-  // New job form
   const [newJobName, setNewJobName] = useState("");
   const [newJobClient, setNewJobClient] = useState("");
-
-  // Log form
   const [logDate, setLogDate] = useState(new Date().toISOString().split("T")[0]);
   const [logPayee, setLogPayee] = useState("");
   const [logCode, setLogCode] = useState("");
@@ -44,17 +41,14 @@ export default function FieldLedger() {
   const [logDesc, setLogDesc] = useState("");
   const [acList, setAcList] = useState([]);
   const [acIdx, setAcIdx] = useState(-1);
-
-  // Voice
   const [voiceText, setVoiceText] = useState("");
   const [voiceStatus, setVoiceStatus] = useState("");
+  const [payLabel, setPayLabel] = useState("");
+  const [payAmt, setPayAmt] = useState("");
+
   const { isRecording, toggle: toggleVoice } = useVoiceInput((t) =>
     setVoiceText((prev) => (prev ? prev + " " + t : t))
   );
-
-  // Payments
-  const [payLabel, setPayLabel] = useState("");
-  const [payAmt, setPayAmt] = useState("");
 
   const persist = useCallback((j, e, p, b) => {
     setJobs(j); setEntries(e); setPayments(p); setBudgets(b);
@@ -66,7 +60,9 @@ export default function FieldLedger() {
 
   const addJob = () => {
     if (!newJobName.trim()) return;
-    const j = { id: Date.now().toString(), name: newJobName.trim(), client: newJobClient.trim(), created: new Date().toISOString() };
+    const name = newJobName.trim();
+    const client = newJobClient.trim() || (activeProject?.client_name || "");
+    const j = { id: Date.now().toString(), name, client, created: new Date().toISOString() };
     const updated = [...jobs, j];
     persist(updated, entries, payments, budgets);
     setActiveJob(j.id); setNewJobName(""); setNewJobClient(""); setShowNewJob(false);
@@ -153,8 +149,6 @@ export default function FieldLedger() {
 
   const jobEntries = entries.filter((e) => e.jobId === activeJob);
   const activeJobObj = jobs.find((j) => j.id === activeJob);
-
-  // Reconciliation calculations
   const byCode = {};
   jobEntries.forEach((e) => { byCode[e.code] = (byCode[e.code] || 0) + e.amount; });
   const total = Object.values(byCode).reduce((a, b) => a + b, 0);
@@ -164,6 +158,17 @@ export default function FieldLedger() {
 
   return (
     <div className="fade-up">
+      {/* Active project banner */}
+      {activeProject && (
+        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 14 }}>📁</span>
+          <div>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
+            <div style={{ fontSize: 12, color: "#909ab0" }}>{activeProject.client_name || ""}</div>
+          </div>
+        </div>
+      )}
+
       {/* Job selector */}
       <div className="fl-job-bar">
         <label className="field-label" style={{ margin: 0, whiteSpace: "nowrap" }}>Active Job</label>
@@ -174,13 +179,18 @@ export default function FieldLedger() {
         <button className="btn" onClick={() => setShowNewJob((v) => !v)}>+ New Job</button>
       </div>
 
-      {/* New job form */}
       {showNewJob && (
-        <div className="fl-card fade-up" style={{ marginBottom: 20, border: "1px solid #f0a500" }}>
+        <div className="fl-card fade-up" style={{ marginBottom: 20, border: "1.5px solid #f0a500" }}>
           <div className="section-label">Create Job</div>
           <div className="row-2 input-group">
-            <div><label className="field-label">Job Name *</label><input type="text" placeholder="Oak Valley Kitchen Remodel" value={newJobName} onChange={(e) => setNewJobName(e.target.value)} /></div>
-            <div><label className="field-label">Client Name</label><input type="text" placeholder="Johnson Family" value={newJobClient} onChange={(e) => setNewJobClient(e.target.value)} /></div>
+            <div>
+              <label className="field-label">Job Name *</label>
+              <input type="text" placeholder={activeProject?.name || "Oak Valley Kitchen Remodel"} value={newJobName} onChange={(e) => setNewJobName(e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">Client Name</label>
+              <input type="text" placeholder={activeProject?.client_name || "Johnson Family"} value={newJobClient} onChange={(e) => setNewJobClient(e.target.value)} />
+            </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button className="btn btn-primary" disabled={!newJobName.trim()} onClick={addJob}>Create Job</button>
@@ -190,46 +200,31 @@ export default function FieldLedger() {
       )}
 
       {!activeJob ? (
-        <div style={{ background: "#131720", border: "1px solid #252d42", padding: "40px 32px", textAlign: "center", color: "#6b7599" }}>
+        <div style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "40px 32px", textAlign: "center", color: "#909ab0", borderRadius: 8 }}>
           <div style={{ fontSize: 28, marginBottom: 12 }}>📒</div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 6 }}>No job selected</div>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 6, color: "#1a1f2e" }}>No job selected</div>
           <div style={{ fontSize: 13 }}>Create a job above or select an existing one to start logging expenses.</div>
         </div>
       ) : (
         <>
-          {/* Tab bar */}
           <div className="fl-tab-bar">
             {[["log","Log Expense"],["ledger","Ledger"],["recon","Reconciliation"]].map(([id, label]) => (
               <div key={id} className={`fl-tab${tab === id ? " active" : ""}`} onClick={() => setTab(id)}>{label}</div>
             ))}
           </div>
 
-          {/* ── LOG TAB ── */}
           {tab === "log" && (
             <>
               <div className="fl-card" style={{ marginBottom: 16 }}>
                 <div className="section-label">Voice Entry</div>
                 <div style={{ display: "flex", gap: 10, marginBottom: 14, alignItems: "flex-start" }}>
-                  <textarea
-                    value={voiceText}
-                    onChange={(e) => setVoiceText(e.target.value)}
-                    placeholder='Speak or type: "Paid Home Depot $340 cash, framing lumber"'
-                    style={{ flex: 1, minHeight: 70 }}
-                  />
+                  <textarea value={voiceText} onChange={(e) => setVoiceText(e.target.value)} placeholder='Speak or type: "Paid Home Depot $340 cash, framing lumber"' style={{ flex: 1, minHeight: 70 }} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <button className={`voice-btn${isRecording ? " recording" : ""}`} onClick={toggleVoice}>
-                      {isRecording ? "⏹ Stop" : "🎤 Record"}
-                    </button>
-                    <button className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12 }} disabled={!voiceText.trim()} onClick={parseVoice}>
-                      Parse →
-                    </button>
+                    <button className={`voice-btn${isRecording ? " recording" : ""}`} onClick={toggleVoice}>{isRecording ? "⏹ Stop" : "🎤 Record"}</button>
+                    <button className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12 }} disabled={!voiceText.trim()} onClick={parseVoice}>Parse →</button>
                   </div>
                 </div>
-                {voiceStatus && (
-                  <div style={{ fontSize: 12, color: voiceStatus.startsWith("✓") ? "#27ae60" : "#6b7599", fontFamily: "'IBM Plex Mono',monospace" }}>
-                    {voiceStatus}
-                  </div>
-                )}
+                {voiceStatus && <div style={{ fontSize: 12, color: voiceStatus.startsWith("✓") ? "#27ae60" : "#909ab0", fontFamily: "'DM Mono',monospace" }}>{voiceStatus}</div>}
               </div>
 
               <div className="fl-card">
@@ -241,21 +236,11 @@ export default function FieldLedger() {
                 <div className="row-3 input-group">
                   <div style={{ position: "relative" }}>
                     <label className="field-label">Cost Code *</label>
-                    <input
-                      type="text"
-                      placeholder="Type to search…"
-                      value={logCode}
-                      onChange={(e) => onCodeInput(e.target.value)}
-                      onKeyDown={onCodeKey}
-                      onBlur={() => setTimeout(() => setAcList([]), 150)}
-                      autoComplete="off"
-                    />
+                    <input type="text" placeholder="Type to search…" value={logCode} onChange={(e) => onCodeInput(e.target.value)} onKeyDown={onCodeKey} onBlur={() => setTimeout(() => setAcList([]), 150)} autoComplete="off" />
                     {acList.length > 0 && (
                       <div className="fl-ac-list">
                         {acList.map((c, i) => (
-                          <div key={c} className={`fl-ac-item${i === acIdx ? " selected" : ""}`} onMouseDown={() => { setLogCode(c); setAcList([]); }}>
-                            {c}
-                          </div>
+                          <div key={c} className={`fl-ac-item${i === acIdx ? " selected" : ""}`} onMouseDown={() => { setLogCode(c); setAcList([]); }}>{c}</div>
                         ))}
                       </div>
                     )}
@@ -272,28 +257,19 @@ export default function FieldLedger() {
                   <label className="field-label">Description</label>
                   <input type="text" placeholder="What was this for?" value={logDesc} onChange={(e) => setLogDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && logExpense()} />
                 </div>
-                <button className="btn btn-primary btn-lg" disabled={!logCode.trim() || !logAmt} onClick={logExpense}>
-                  + Log Expense
-                </button>
+                <button className="btn btn-primary btn-lg" disabled={!logCode.trim() || !logAmt} onClick={logExpense}>+ Log Expense</button>
               </div>
             </>
           )}
 
-          {/* ── LEDGER TAB ── */}
           {tab === "ledger" && (
             <div className="fl-card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>
-                  {activeJobObj?.name} — All Expenses
-                </div>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: "#f0a500" }}>
-                  {fmt(jobEntries.reduce((a, e) => a + e.amount, 0))} total
-                </div>
+                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: "#1a1f2e" }}>{activeJobObj?.name} — All Expenses</div>
+                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#c47f00" }}>{fmt(jobEntries.reduce((a, e) => a + e.amount, 0))} total</div>
               </div>
               {jobEntries.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "32px 0", color: "#6b7599", fontSize: 13 }}>
-                  No expenses logged yet. Switch to Log Expense to add your first entry.
-                </div>
+                <div style={{ textAlign: "center", padding: "32px 0", color: "#909ab0", fontSize: 13 }}>No expenses logged yet.</div>
               ) : (
                 <>
                   <div className="fl-entry-hdr">
@@ -301,12 +277,12 @@ export default function FieldLedger() {
                   </div>
                   {[...jobEntries].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
                     <div key={e.id} className="fl-entry-row">
-                      <div className="fl-mono" style={{ color: "#6b7599" }}>{e.date}</div>
+                      <div className="fl-mono" style={{ color: "#909ab0" }}>{e.date}</div>
                       <div style={{ fontWeight: 600, fontSize: 12 }}>{e.code}</div>
-                      <div style={{ fontSize: 12 }}>{[e.payee, e.desc].filter(Boolean).join(" — ") || "—"}</div>
-                      <div style={{ fontSize: 11, color: "#6b7599", fontFamily: "'IBM Plex Mono',monospace" }}>{e.pay}</div>
-                      <div className="fl-mono" style={{ color: "#f0a500" }}>{fmt(e.amount)}</div>
-                      <div style={{ cursor: "pointer", color: "#3a4260", fontSize: 13, textAlign: "center" }} onClick={() => deleteEntry(e.id)}>✕</div>
+                      <div style={{ fontSize: 12, color: "#1a1f2e" }}>{[e.payee, e.desc].filter(Boolean).join(" — ") || "—"}</div>
+                      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>{e.pay}</div>
+                      <div className="fl-mono" style={{ color: "#c47f00" }}>{fmt(e.amount)}</div>
+                      <div style={{ cursor: "pointer", color: "#c0c8d8", fontSize: 13, textAlign: "center" }} onClick={() => deleteEntry(e.id)}>✕</div>
                     </div>
                   ))}
                 </>
@@ -314,7 +290,6 @@ export default function FieldLedger() {
             </div>
           )}
 
-          {/* ── RECONCILIATION TAB ── */}
           {tab === "recon" && (
             <>
               <div className="stat-row">
@@ -329,12 +304,9 @@ export default function FieldLedger() {
               <div style={{ display: "flex", gap: 12, marginBottom: 18, alignItems: "center" }}>
                 <button className="btn btn-primary" onClick={exportRecon}>⬇ Export (.TSV)</button>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#6b7599" }}>Budget mode</span>
-                  <div
-                    onClick={() => setBudgetMode((v) => !v)}
-                    style={{ width: 36, height: 20, background: budgetMode ? "#f0a500" : "#252d42", borderRadius: 10, cursor: "pointer", position: "relative", transition: "background 0.2s" }}
-                  >
-                    <div style={{ position: "absolute", top: 3, left: budgetMode ? 19 : 3, width: 14, height: 14, background: "#fff", borderRadius: "50%", transition: "left 0.2s" }} />
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "#909ab0" }}>Budget mode</span>
+                  <div onClick={() => setBudgetMode((v) => !v)} style={{ width: 36, height: 20, background: budgetMode ? "#f0a500" : "#e0e4ef", borderRadius: 10, cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
+                    <div style={{ position: "absolute", top: 3, left: budgetMode ? 19 : 3, width: 14, height: 14, background: "#fff", borderRadius: "50%", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }} />
                   </div>
                 </div>
               </div>
@@ -345,25 +317,19 @@ export default function FieldLedger() {
                     <div key={i} className="fl-hdr-cell">{h}</div>
                   ))}
                 </div>
-
                 {Object.keys(byCode).length === 0 ? (
-                  <div style={{ padding: "24px 0", textAlign: "center", color: "#6b7599", fontSize: 13 }}>No expenses logged for this job.</div>
+                  <div style={{ padding: "24px 0", textAlign: "center", color: "#909ab0", fontSize: 13 }}>No expenses logged for this job.</div>
                 ) : (
                   Object.entries(byCode).map(([code, actual]) => {
                     const budget = jobBudgets[code] || 0;
                     const diff = budget ? actual - budget : null;
                     return (
                       <div key={code} className={`fl-recon-row${budgetMode ? "" : " no-budget"}`}>
-                        <div style={{ fontWeight: 600 }}>{code}</div>
-                        <div className="fl-mono" style={{ color: "#f0a500" }}>{fmt(actual)}</div>
+                        <div style={{ fontWeight: 600, color: "#1a1f2e" }}>{code}</div>
+                        <div className="fl-mono" style={{ color: "#c47f00" }}>{fmt(actual)}</div>
                         {budgetMode && (
                           <div>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={budget || ""}
-                              placeholder="Set budget"
+                            <input type="number" min="0" step="0.01" value={budget || ""} placeholder="Set budget"
                               onChange={(e) => {
                                 const b = { ...budgets, [activeJob]: { ...(budgets[activeJob] || {}), [code]: parseFloat(e.target.value) || 0 } };
                                 persist(jobs, entries, payments, b);
@@ -376,42 +342,40 @@ export default function FieldLedger() {
                           <div>
                             {diff !== null && budget > 0
                               ? <span className={diff > 0 ? "fl-over" : "fl-under"}>{diff > 0 ? `▲ ${fmt(diff)}` : `▼ ${fmt(Math.abs(diff))}`}</span>
-                              : <span style={{ color: "#3a4260", fontSize: 11 }}>—</span>
+                              : <span style={{ color: "#c0c8d8", fontSize: 11 }}>—</span>
                             }
                           </div>
                         )}
-                        <div style={{ fontSize: 11, color: "#3a4260" }}>—</div>
+                        <div style={{ fontSize: 11, color: "#c0c8d8" }}>—</div>
                       </div>
                     );
                   })
                 )}
-
                 <div className="fl-total-bar">
-                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em" }}>TOTAL JOB COST</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 20, color: "#f0a500" }}>{fmt(total)}</span>
+                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em", color: "#1a1f2e" }}>TOTAL JOB COST</span>
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 20, color: "#c47f00" }}>{fmt(total)}</span>
                 </div>
               </div>
 
-              {/* Payments received */}
               <div className="section-label" style={{ marginTop: 24 }}>Payments Received</div>
               <div className="fl-card">
                 {payments.filter((p) => p.jobId === activeJob).map((p) => (
                   <div key={p.id} className="fl-pay-row">
-                    <div style={{ fontSize: 13 }}>{p.label}</div>
+                    <div style={{ fontSize: 13, color: "#1a1f2e" }}>{p.label}</div>
                     <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                      <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 13, color: "#27ae60" }}>{fmt(p.amount)}</span>
-                      <span style={{ cursor: "pointer", color: "#3a4260", fontSize: 13 }} onClick={() => persist(jobs, entries, payments.filter((x) => x.id !== p.id), budgets)}>✕</span>
+                      <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: "#27ae60" }}>{fmt(p.amount)}</span>
+                      <span style={{ cursor: "pointer", color: "#c0c8d8", fontSize: 13 }} onClick={() => persist(jobs, entries, payments.filter((x) => x.id !== p.id), budgets)}>✕</span>
                     </div>
                   </div>
                 ))}
-                <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 14, borderTop: "1px solid #252d42" }}>
+                <div style={{ display: "flex", gap: 10, marginTop: 14, paddingTop: 14, borderTop: "1px solid #f0f2f5" }}>
                   <input type="text" placeholder="Label (e.g. Construction Deposit)" value={payLabel} onChange={(e) => setPayLabel(e.target.value)} style={{ flex: 2 }} />
                   <input type="number" min="0" step="0.01" placeholder="Amount" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} style={{ flex: 1 }} />
                   <button className="btn btn-primary" disabled={!payAmt} onClick={addPayment}>+ Add</button>
                 </div>
                 <div className="fl-total-bar" style={{ borderTopColor: balanceDue > 0 ? "#e74c3c" : "#27ae60" }}>
-                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em" }}>BALANCE DUE</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 20, color: balanceDue > 0 ? "#e74c3c" : "#27ae60" }}>
+                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em", color: "#1a1f2e" }}>BALANCE DUE</span>
+                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 20, color: balanceDue > 0 ? "#e74c3c" : "#27ae60" }}>
                     {fmt(Math.abs(balanceDue))}{balanceDue <= 0 ? " ✓" : ""}
                   </span>
                 </div>

@@ -6,6 +6,8 @@ import Sidebar from "./components/Sidebar";
 import PageHeader from "./components/PageHeader";
 import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
+import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import ScopeGPT from "./tools/ScopeGPT";
 import ScheduleGPT from "./tools/ScheduleGPT";
 import BidMatch from "./tools/BidMatch";
@@ -14,20 +16,23 @@ import FieldLedger from "./tools/FieldLedger";
 
 function AppShell({ user }) {
   const location = useLocation();
+  const [activeProject, setActiveProject] = useState(null);
 
   return (
     <>
-      <Sidebar user={user} />
+      <Sidebar user={user} activeProject={activeProject} />
       <div className="main-wrap">
-        <PageHeader pathname={location.pathname} />
+        <PageHeader pathname={location.pathname} activeProject={activeProject} />
         <div className="page-content">
           <Routes>
             <Route path="/"            element={<Dashboard user={user} />} />
-            <Route path="/scope"       element={<ScopeGPT />} />
-            <Route path="/schedule"    element={<ScheduleGPT />} />
-            <Route path="/bidmatch"    element={<BidMatch />} />
-            <Route path="/changeorder" element={<ChangeOrderGPT />} />
-            <Route path="/fieldledger" element={<FieldLedger />} />
+            <Route path="/projects"    element={<Projects />} />
+            <Route path="/projects/:id" element={<ProjectDetail onProjectLoad={setActiveProject} />} />
+            <Route path="/scope"       element={<ScopeGPT activeProject={activeProject} />} />
+            <Route path="/schedule"    element={<ScheduleGPT activeProject={activeProject} />} />
+            <Route path="/bidmatch"    element={<BidMatch activeProject={activeProject} />} />
+            <Route path="/changeorder" element={<ChangeOrderGPT activeProject={activeProject} />} />
+            <Route path="/fieldledger" element={<FieldLedger activeProject={activeProject} />} />
             <Route path="*"            element={<Navigate to="/" replace />} />
           </Routes>
         </div>
@@ -37,15 +42,13 @@ function AppShell({ user }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState(undefined); // undefined = loading
+  const [user, setUser] = useState(undefined);
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
     });
 
-    // Listen for auth changes (magic link callback, logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
     });
@@ -53,7 +56,6 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Loading state — brief flash while Supabase checks session
   if (user === undefined) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>

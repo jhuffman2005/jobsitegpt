@@ -11,7 +11,7 @@ const STEPS = [
   "Finalizing scope document…",
 ];
 
-export default function ScopeGPT() {
+export default function ScopeGPT({ activeProject }) {
   const navigate = useNavigate();
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
@@ -22,6 +22,8 @@ export default function ScopeGPT() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
+
+  const projName = activeProject?.name || projectName;
 
   const generate = async () => {
     setStatus("loading"); setStepIdx(0); setError("");
@@ -36,17 +38,20 @@ export default function ScopeGPT() {
         else
           content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
       });
+
+      const projectContext = activeProject
+        ? `Project: "${activeProject.name}" | Client: "${activeProject.client_name || "N/A"}" | Address: "${activeProject.address || "N/A"}" | Contract: ${activeProject.contract_type?.replace("_", " ")} | Type: ${projectType}`
+        : `Project: "${projName}" | Type: ${projectType}`;
+
       content.push({
         type: "text",
-        text: `Project: "${projectName}" | Type: ${projectType}\nNotes: ${notes || "None"}\n\nGenerate a complete professional scope of work. Return ONLY valid JSON:\n{"projectName":"string","projectType":"string","projectAddress":"string or null","overview":"string","trades":[{"id":1,"tradeName":"string","contractor":"string","scopeText":"string","lineItems":[{"description":"string","note":"string or null"}]}],"generalConditions":["string"],"exclusions":["string"],"clarifications":["string"],"estimatedDuration":"string","totalLineItemCount":0}`,
+        text: `${projectContext}\nNotes: ${notes || "None"}\n\nGenerate a complete professional scope of work. Return ONLY valid JSON:\n{"projectName":"string","projectType":"string","projectAddress":"string or null","overview":"string","trades":[{"id":1,"tradeName":"string","contractor":"string","scopeText":"string","lineItems":[{"description":"string","note":"string or null"}]}],"generalConditions":["string"],"exclusions":["string"],"clarifications":["string"],"estimatedDuration":"string","totalLineItemCount":0}`,
       });
       timers.forEach(clearTimeout);
       const r = await callClaude(
         [{ role: "user", content }],
-        "You are an expert GC with 20+ years writing professional scopes of work. Be thorough and complete. Return valid JSON only, no markdown, no explanation, no preamble.",
-        16000
+        "You are an expert GC with 20+ years writing professional scopes of work. Be thorough and complete. Return valid JSON only, no markdown, no explanation, no preamble."
       );
-      
       setResult(r); setStatus("done");
     } catch (e) {
       timers.forEach(clearTimeout);
@@ -72,13 +77,30 @@ export default function ScopeGPT() {
 
   return (
     <div className="fade-up">
+      {/* Active project banner */}
+      {activeProject && (
+        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 14 }}>📁</span>
+          <div>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
+            <div style={{ fontSize: 12, color: "#909ab0" }}>{[activeProject.client_name, activeProject.address].filter(Boolean).join(" · ")}</div>
+          </div>
+        </div>
+      )}
+
       {(status === "idle" || status === "error") && (
         <>
           <div className="section-label">Project Details</div>
           <div className="row-2 input-group">
             <div>
               <label className="field-label">Project Name *</label>
-              <input type="text" placeholder="e.g. Johnson Kitchen & Bath Remodel" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+              <input
+                type="text"
+                placeholder="e.g. Johnson Kitchen & Bath Remodel"
+                value={activeProject?.name || projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                disabled={!!activeProject?.name}
+              />
             </div>
             <div>
               <label className="field-label">Project Type</label>
@@ -104,7 +126,7 @@ export default function ScopeGPT() {
           </div>
 
           {error && <div className="error-box">⚠ {error}</div>}
-          <button className="btn btn-primary btn-lg" disabled={!projectName.trim()} onClick={generate}>
+          <button className="btn btn-primary btn-lg" disabled={!projName.trim()} onClick={generate}>
             ⚡ Generate Scope of Work
           </button>
         </>
@@ -131,7 +153,7 @@ export default function ScopeGPT() {
             <div style={{ fontSize: 22 }}>🔗</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to schedule this project?</div>
-              <div style={{ fontSize: 12, color: "#6b7599" }}>Export the JSON and import it in ScheduleGPT to auto-generate your Gantt chart.</div>
+              <div style={{ fontSize: 12, color: "#606880" }}>Export the JSON and import it in ScheduleGPT to auto-generate your Gantt chart.</div>
             </div>
             <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={() => navigate("/schedule")}>
               Open ScheduleGPT →

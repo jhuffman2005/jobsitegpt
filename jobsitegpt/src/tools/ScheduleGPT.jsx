@@ -11,15 +11,15 @@ const STEPS = [
 ];
 
 const PHASE_COLORS = [
-  { bg: "rgba(240,165,0,0.12)",   color: "#c47f00" },
-  { bg: "rgba(74,144,226,0.12)",  color: "#4a90e2" },
-  { bg: "rgba(39,174,96,0.12)",   color: "#27ae60" },
-  { bg: "rgba(139,92,246,0.12)",  color: "#8b5cf6" },
-  { bg: "rgba(231,76,60,0.12)",   color: "#e74c3c" },
-  { bg: "rgba(16,185,129,0.12)",  color: "#10b981" },
+  { bg: "rgba(240,165,0,0.1)",   color: "#c47f00" },
+  { bg: "rgba(74,144,226,0.1)",  color: "#4a90e2" },
+  { bg: "rgba(39,174,96,0.1)",   color: "#27ae60" },
+  { bg: "rgba(139,92,246,0.1)",  color: "#8b5cf6" },
+  { bg: "rgba(231,76,60,0.1)",   color: "#e74c3c" },
+  { bg: "rgba(16,185,129,0.1)",  color: "#10b981" },
 ];
 
-export default function ScheduleGPT() {
+export default function ScheduleGPT({ activeProject }) {
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [projectType, setProjectType] = useState("remodel");
@@ -28,6 +28,8 @@ export default function ScheduleGPT() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
+
+  const projName = activeProject?.name || projectName;
 
   const generate = async () => {
     setStatus("loading"); setStepIdx(0); setError("");
@@ -42,15 +44,19 @@ export default function ScheduleGPT() {
         else
           content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
       });
+
+      const projectContext = activeProject
+        ? `Project: "${activeProject.name}" | Client: "${activeProject.client_name || "N/A"}" | Address: "${activeProject.address || "N/A"}" | Type: ${projectType === "remodel" ? "Remodel/Renovation" : "New Construction"}`
+        : `Project: "${projName}" | Type: ${projectType === "remodel" ? "Remodel/Renovation" : "New Construction"}`;
+
       content.push({
         type: "text",
-        text: `Project: "${projectName || "Construction Project"}" | Type: ${projectType === "remodel" ? "Remodel/Renovation" : "New Construction"}\n\nAnalyze and return ONLY valid JSON:\n{"projectName":"string","totalDays":0,"phases":["Phase1"],"tasks":[{"id":1,"task":"string","phase":"string","startDay":1,"durationDays":5,"dependencies":[],"trade":"string","notes":"string"}],"subcontractors":[{"trade":"string","phase":"string","estimatedDays":0,"recommendedSubTypes":["string"],"scope":"string"}]}\n\nA full renovation: 15-30 tasks across multiple phases. Keep task names under 50 chars, notes under 60 chars, recommendedSubTypes 2-3 items max.`,
+        text: `${projectContext}\n\nAnalyze and return ONLY valid JSON:\n{"projectName":"string","totalDays":0,"phases":["Phase1"],"tasks":[{"id":1,"task":"string","phase":"string","startDay":1,"durationDays":5,"dependencies":[],"trade":"string","notes":"string"}],"subcontractors":[{"trade":"string","phase":"string","estimatedDays":0,"recommendedSubTypes":["string"],"scope":"string"}]}\n\nA full renovation: 15-30 tasks across multiple phases. Keep task names under 50 chars, notes under 60 chars, recommendedSubTypes 2-3 items max.`,
       });
       timers.forEach(clearTimeout);
       const r = await callClaude(
         [{ role: "user", content }],
-        `You are an expert construction scheduler. ${projectType === "remodel" ? "Focus on interior trades; only include exterior if documents explicitly call for them." : "Include full sequence: site work, excavation, foundation, framing, exterior, MEP, finishes."} Return valid JSON only, no markdown.`,
-        16000
+        `You are an expert construction scheduler. ${projectType === "remodel" ? "Focus on interior trades; only include exterior if documents explicitly call for them." : "Include full sequence: site work, excavation, foundation, framing, exterior, MEP, finishes."} Return valid JSON only, no markdown.`
       );
       setResult(r); setStatus("done");
     } catch (e) {
@@ -80,13 +86,30 @@ export default function ScheduleGPT() {
 
   return (
     <div className="fade-up">
+      {/* Active project banner */}
+      {activeProject && (
+        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 14 }}>📁</span>
+          <div>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
+            <div style={{ fontSize: 12, color: "#909ab0" }}>{[activeProject.client_name, activeProject.address].filter(Boolean).join(" · ")}</div>
+          </div>
+        </div>
+      )}
+
       {(status === "idle" || status === "error") && (
         <>
           <div className="section-label">Project Info</div>
           <div className="row-2 input-group">
             <div>
               <label className="field-label">Project Name</label>
-              <input type="text" placeholder="e.g. Riverside Townhomes Phase 2" value={projectName} onChange={(e) => setProjectName(e.target.value)} />
+              <input
+                type="text"
+                placeholder="e.g. Riverside Townhomes Phase 2"
+                value={activeProject?.name || projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                disabled={!!activeProject?.name}
+              />
             </div>
             <div>
               <label className="field-label">Project Type</label>
@@ -105,7 +128,7 @@ export default function ScheduleGPT() {
           {error && <div className="error-box">⚠ {error}</div>}
           <button
             className="btn btn-primary btn-lg"
-            disabled={files.length === 0 && !projectName.trim()}
+            disabled={files.length === 0 && !projName.trim()}
             onClick={generate}
           >
             📅 Generate Gantt Chart
@@ -151,13 +174,13 @@ export default function ScheduleGPT() {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
                     <tr key={t.id}>
-                      <td style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#3a4260" }}>{t.id}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "#c0c8d8" }}>{t.id}</td>
                       <td style={{ fontWeight: 600 }}>{t.task}</td>
                       <td><span className="phase-pill" style={{ background: pc.bg, color: pc.color }}>{t.phase}</span></td>
-                      <td style={{ color: "#6b7599" }}>{t.trade}</td>
-                      <td style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11 }}>Day {t.startDay}</td>
-                      <td style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11 }}>{t.durationDays}d</td>
-                      <td style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#3a4260" }}>{t.dependencies.length ? t.dependencies.join(", ") : "—"}</td>
+                      <td style={{ color: "#606880" }}>{t.trade}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>Day {t.startDay}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{t.durationDays}d</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#c0c8d8" }}>{t.dependencies.length ? t.dependencies.join(", ") : "—"}</td>
                     </tr>
                   );
                 })}
@@ -178,9 +201,9 @@ export default function ScheduleGPT() {
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{s.trade}</td>
                       <td><span className="phase-pill" style={{ background: pc.bg, color: pc.color }}>{s.phase}</span></td>
-                      <td style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11 }}>{s.estimatedDays}d</td>
-                      <td style={{ fontSize: 11, color: "#6b7599" }}>{s.recommendedSubTypes.join(", ")}</td>
-                      <td style={{ fontSize: 11, color: "#6b7599" }}>{s.scope}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{s.estimatedDays}d</td>
+                      <td style={{ fontSize: 11, color: "#606880" }}>{s.recommendedSubTypes.join(", ")}</td>
+                      <td style={{ fontSize: 11, color: "#606880" }}>{s.scope}</td>
                     </tr>
                   );
                 })}

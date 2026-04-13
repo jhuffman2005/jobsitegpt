@@ -47,17 +47,32 @@ export default function Dashboard({ user }) {
   return (
     <div className="fade-up">
       <div style={{ marginBottom: 32 }}>
-        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 32, letterSpacing: "0.04em", marginBottom: 6 }}>
+        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 32, letterSpacing: "0.04em", marginBottom: 6, color: "#1a1f2e" }}>
           Welcome back{firstName ? `, ${firstName}` : ""}.
         </div>
-        <div style={{ fontSize: 14, color: "#6b7599" }}>
+        <div style={{ fontSize: 14, color: "#606880" }}>
           Your AI-powered construction toolkit. Five tools, one workflow.
         </div>
       </div>
 
+      {/* Projects CTA */}
+      <div
+        onClick={() => navigate("/projects")}
+        style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", borderLeft: "4px solid #f0a500", padding: "16px 20px", marginBottom: 24, cursor: "pointer", display: "flex", alignItems: "center", gap: 16, borderRadius: "0 8px 8px 0", transition: "all 0.15s" }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = "#c0c8d8"}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e4ef"; e.currentTarget.style.borderLeftColor = "#f0a500"; }}
+      >
+        <div style={{ fontSize: 24 }}>📁</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, color: "#1a1f2e", marginBottom: 2 }}>Start with a Project</div>
+          <div style={{ fontSize: 13, color: "#606880" }}>Set up your project details once — client info, address, contract type — and every tool reads from it automatically.</div>
+        </div>
+        <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 14, color: "#c0c8d8" }}>→</div>
+      </div>
+
       {/* Workflow banner */}
       <div className="workflow-banner">
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#6b7599", letterSpacing: "0.12em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#909ab0", letterSpacing: "0.12em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
           Project Workflow
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -76,11 +91,11 @@ export default function Dashboard({ user }) {
             <div className="tool-card-num">{t.badge} / 05</div>
             <div className="tool-card-name">{t.name}</div>
             <div className="tool-card-desc">{t.desc}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#3a4260" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#c0c8d8" }}>
               {t.flow.map((f, i) =>
                 f === "→"
                   ? <span key={i} style={{ color: "#f0a500" }}>{f}</span>
-                  : <span key={i} style={{ background: "#1a2030", border: "1px solid #252d42", padding: "3px 8px", fontSize: 10 }}>{f}</span>
+                  : <span key={i} className="wf-step">{f}</span>
               )}
             </div>
             <div className="tool-card-arrow">→</div>

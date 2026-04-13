@@ -13,7 +13,7 @@ const STEPS = [
 
 const fmt = (p) => p ? `$${Number(p).toLocaleString()}` : "N/A";
 
-export default function BidMatch() {
+export default function BidMatch({ activeProject }) {
   const [bids, setBids] = useState([
     { name: "", files: [], b64: {} },
     { name: "", files: [], b64: {} },
@@ -58,6 +58,11 @@ export default function BidMatch() {
     const timers = STEPS.map((_, i) => setTimeout(() => setStepIdx(i), i * 2000));
     try {
       const content = [];
+
+      if (activeProject) {
+        content.push({ type: "text", text: `Project Context: "${activeProject.name}" | Client: "${activeProject.client_name || "N/A"}" | Address: "${activeProject.address || "N/A"}" | Contract: ${activeProject.contract_type?.replace("_", " ")}` });
+      }
+
       bids.forEach((bid, bi) => {
         content.push({ type: "text", text: `\n--- BID ${bi + 1}: ${bid.name || `Contractor ${bi + 1}`} ---` });
         bid.files.forEach((f) => {
@@ -71,7 +76,7 @@ export default function BidMatch() {
       });
       content.push({
         type: "text",
-        text: `Project: ${projectDesc || "As described in bid documents"}\n\nAnalyze all bids and return ONLY valid JSON:\n{"projectSummary":"string","recommendedBidIndex":0,"analysis":{"totalBids":0,"pricingRange":{"low":0,"high":0},"averagePrice":0},"bids":[{"bidIndex":0,"contractorName":"string","totalPrice":0,"normalizedPrice":0,"grade":"A","summary":"string","scopeFlags":["string"],"inclusions":["string"],"exclusions":["string"],"redFlags":["string"],"strengths":["string"]}],"scopeGaps":["string"],"recommendation":"string"}`,
+        text: `Project: ${projectDesc || activeProject?.name || "As described in bid documents"}\n\nAnalyze all bids and return ONLY valid JSON:\n{"projectSummary":"string","recommendedBidIndex":0,"analysis":{"totalBids":0,"pricingRange":{"low":0,"high":0},"averagePrice":0},"bids":[{"bidIndex":0,"contractorName":"string","totalPrice":0,"normalizedPrice":0,"grade":"A","summary":"string","scopeFlags":["string"],"inclusions":["string"],"exclusions":["string"],"redFlags":["string"],"strengths":["string"]}],"scopeGaps":["string"],"recommendation":"string"}`,
       });
       timers.forEach(clearTimeout);
       const r = await callClaude(
@@ -96,6 +101,17 @@ export default function BidMatch() {
 
   return (
     <div className="fade-up">
+      {/* Active project banner */}
+      {activeProject && (
+        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 14 }}>📁</span>
+          <div>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
+            <div style={{ fontSize: 12, color: "#909ab0" }}>{[activeProject.client_name, activeProject.address].filter(Boolean).join(" · ")}</div>
+          </div>
+        </div>
+      )}
+
       {(status === "idle" || status === "error") && (
         <>
           <div className="section-label">Project Description</div>
@@ -111,9 +127,9 @@ export default function BidMatch() {
 
           <div className="section-label">Contractor Bids</div>
           {bids.map((bid, i) => (
-            <div key={i} style={{ background: "#131720", border: "1px solid #252d42", padding: "18px 20px", marginBottom: 14 }}>
+            <div key={i} style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "18px 20px", marginBottom: 14, borderRadius: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: "#f0a500", background: "rgba(240,165,0,0.12)", padding: "3px 10px", border: "1px solid rgba(240,165,0,0.2)", whiteSpace: "nowrap" }}>
+                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: "#c47f00", background: "rgba(240,165,0,0.1)", padding: "3px 10px", border: "1px solid rgba(240,165,0,0.2)", borderRadius: 4, whiteSpace: "nowrap" }}>
                   BID {i + 1}
                 </div>
                 <input type="text" placeholder={`Contractor ${i + 1} name`} value={bid.name} onChange={(e) => updateName(i, e.target.value)} style={{ flex: 1 }} />
@@ -168,9 +184,9 @@ export default function BidMatch() {
             </div>
           </div>
 
-          <div style={{ background: "#131720", border: "1px solid #f0a500", borderTop: "3px solid #f0a500", padding: "16px 20px", marginBottom: 22 }}>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#6b7599", marginBottom: 8 }}>AI Recommendation</div>
-            <div style={{ fontSize: 14, lineHeight: 1.7 }}>{result.recommendation}</div>
+          <div style={{ background: "#ffffff", border: "1.5px solid #f0a500", borderTop: "3px solid #f0a500", padding: "16px 20px", marginBottom: 22, borderRadius: 8 }}>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#909ab0", marginBottom: 8 }}>AI Recommendation</div>
+            <div style={{ fontSize: 14, lineHeight: 1.7, color: "#1a1f2e" }}>{result.recommendation}</div>
           </div>
 
           <div className="section-label">Bid Comparison</div>
@@ -181,7 +197,7 @@ export default function BidMatch() {
                 {i === result.recommendedBidIndex && <div className="recommended-pill">★ RECOMMENDED</div>}
                 <div className="bid-name">{bid.contractorName}</div>
                 <div className="bid-price">{fmt(bid.totalPrice)} total · {fmt(bid.normalizedPrice)} normalized</div>
-                <div style={{ fontSize: 13, color: "#6b7599", lineHeight: 1.6, marginBottom: 10 }}>{bid.summary}</div>
+                <div style={{ fontSize: 13, color: "#606880", lineHeight: 1.6, marginBottom: 10 }}>{bid.summary}</div>
                 <div className="bid-flags">
                   {bid.redFlags?.map((f, j) => <span key={j} className="bid-flag flag-gap">⚠ {f}</span>)}
                   {bid.strengths?.map((f, j) => <span key={j} className="bid-flag flag-ok">✓ {f}</span>)}
