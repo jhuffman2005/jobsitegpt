@@ -17,8 +17,13 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     if (!response.ok) {
+      console.error("Anthropic error:", JSON.stringify(data));
       return res.status(response.status).json(data);
     }
+
+    // Log the raw response text for debugging
+    const rawText = data.content?.find(b => b.type === "text")?.text || "";
+    console.log("RAW RESPONSE:", rawText.substring(0, 500));
 
     return res.status(200).json(data);
   } catch (err) {
