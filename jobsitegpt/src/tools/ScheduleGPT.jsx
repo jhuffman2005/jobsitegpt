@@ -2,6 +2,7 @@ import { useState } from "react";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
 import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
   "Uploading documents…",
@@ -19,7 +20,7 @@ const PHASE_COLORS = [
   { bg: "rgba(16,185,129,0.1)",  color: "#10b981" },
 ];
 
-export default function ScheduleGPT({ activeProject }) {
+export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [projectType, setProjectType] = useState("remodel");
@@ -86,16 +87,7 @@ export default function ScheduleGPT({ activeProject }) {
 
   return (
     <div className="fade-up">
-      {/* Active project banner */}
-      {activeProject && (
-        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14 }}>📁</span>
-          <div>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
-            <div style={{ fontSize: 12, color: "#909ab0" }}>{[activeProject.client_name, activeProject.address].filter(Boolean).join(" · ")}</div>
-          </div>
-        </div>
-      )}
+      <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
 
       {(status === "idle" || status === "error") && (
         <>

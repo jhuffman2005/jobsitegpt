@@ -1,5 +1,6 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { toBase64 } from "./api";
+import { getProjects } from "./projects";
 
 export function useToast() {
   const [msg, setMsg] = useState(null);
@@ -90,4 +91,26 @@ export function useVoiceInput(onTranscript) {
   };
 
   return { isRecording, toggle };
+}
+
+export function useProjectSwitcher(activeProject, onProjectChange) {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const data = await getProjects();
+        setProjects(data);
+      } catch (e) {
+        console.error("Failed to load projects:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  return { projects, loading };
 }

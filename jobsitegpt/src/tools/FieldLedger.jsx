@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useToast, useVoiceInput } from "../lib/hooks";
+import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const DEFAULT_COST_CODES = [
   "Demolition","Site Work","Concrete","Framing","Roofing","Exterior",
@@ -20,7 +21,7 @@ function load(key, fallback) {
   catch { return fallback; }
 }
 
-export default function FieldLedger({ activeProject }) {
+export default function FieldLedger({ activeProject, onProjectChange }) {
   const [jobs, setJobs] = useState(() => load("fl_jobs", []));
   const [entries, setEntries] = useState(() => load("fl_entries", []));
   const [payments, setPayments] = useState(() => load("fl_payments", []));
@@ -60,8 +61,8 @@ export default function FieldLedger({ activeProject }) {
 
   const addJob = () => {
     if (!newJobName.trim()) return;
-    const name = newJobName.trim();
-    const client = newJobClient.trim() || (activeProject?.client_name || "");
+    const name = newJobName.trim() || activeProject?.name || "";
+    const client = newJobClient.trim() || activeProject?.client_name || "";
     const j = { id: Date.now().toString(), name, client, created: new Date().toISOString() };
     const updated = [...jobs, j];
     persist(updated, entries, payments, budgets);
@@ -158,18 +159,8 @@ export default function FieldLedger({ activeProject }) {
 
   return (
     <div className="fade-up">
-      {/* Active project banner */}
-      {activeProject && (
-        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14 }}>📁</span>
-          <div>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
-            <div style={{ fontSize: 12, color: "#909ab0" }}>{activeProject.client_name || ""}</div>
-          </div>
-        </div>
-      )}
+      <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
 
-      {/* Job selector */}
       <div className="fl-job-bar">
         <label className="field-label" style={{ margin: 0, whiteSpace: "nowrap" }}>Active Job</label>
         <select value={activeJob} onChange={(e) => setActiveJob(e.target.value)} style={{ flex: 1, minWidth: 180 }}>

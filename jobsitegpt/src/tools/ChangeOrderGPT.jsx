@@ -2,6 +2,7 @@ import { useState } from "react";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast, useVoiceInput } from "../lib/hooks";
 import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
   "Processing description…",
@@ -13,7 +14,7 @@ const STEPS = [
 const fmt = (p) =>
   `$${Number(p || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function ChangeOrderGPT({ activeProject }) {
+export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [clientName, setClientName] = useState("");
@@ -27,11 +28,12 @@ export default function ChangeOrderGPT({ activeProject }) {
   const [toast, showToast] = useToast();
   const [sending, setSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [editingLine, setEditingLine] = useState(null);
 
-  // Pre-fill from active project
   const projName = activeProject?.name || projectName;
   const cliName = activeProject?.client_name || clientName;
   const cliEmail = activeProject?.client_email || clientEmail;
+  const markup = activeProject?.markup_percent || 0;
 
   const { isRecording, toggle: toggleVoice } = useVoiceInput((transcript) => {
     setDescription((prev) => (prev ? prev + " " + transcript : transcript));
@@ -52,7 +54,7 @@ export default function ChangeOrderGPT({ activeProject }) {
       });
       content.push({
         type: "text",
-        text: `Project: "${projName}" | Client: "${cliName}" | CO #${coNumber}\nChange Description: ${description}\n\nGenerate a complete change order. Return ONLY valid JSON:\n{"changeOrderNumber":"string","projectName":"string","clientName":"string","date":"string","title":"string","description":"string","reason":"string","lineItems":[{"trade":"string","description":"string","quantity":1,"unit":"string","unitPrice":0,"totalPrice":0}],"subtotal":0,"overhead":0,"profit":0,"totalAmount":0,"daysAdded":0,"contractLanguage":"string","notes":"string"}`,
+        text: `Project: "${projName}" | Client: "${cliName}" | CO #${coNumber}\nMarkup/Profit: ${markup}%\nChange Description: ${description}\n\nGenerate a complete change order. Use ${markup}% for overhead+profit combined. Return ONLY valid JSON:\n{"changeOrderNumber":"string","projectName":"string","clientName":"string","date":"string","title":"string","description":"string","reason":"string","lineItems":[{"trade":"string","description":"string","quantity":1,"unit":"string","unitPrice":0,"totalPrice":0}],"subtotal":0,"overhead":0,"profit":0,"totalAmount":0,"daysAdded":0,"contractLanguage":"string","notes":"string"}`,
       });
       timers.forEach(clearTimeout);
       const r = await callClaude(
@@ -70,6 +72,44 @@ export default function ChangeOrderGPT({ activeProject }) {
   const reset = () => {
     resetFiles(); setProjectName(""); setClientName(""); setClientEmail("");
     setDescription(""); setStatus("idle"); setResult(null); setError(""); setEmailSent(false);
+  };
+
+  // Recalculate totals when line items change
+  const recalcTotals = (lineItems) => {
+    const subtotal = lineItems.reduce((sum, li) => sum + (parseFloat(li.totalPrice) || 0), 0);
+    const overheadRate = markup > 0 ? markup / 2 / 100 : (result.overhead / result.subtotal) || 0.1;
+    const profitRate = markup > 0 ? markup / 2 / 100 : (result.profit / result.subtotal) || 0.1;
+    const overhead = subtotal * overheadRate;
+    const profit = subtotal * profitRate;
+    return { subtotal, overhead, profit, totalAmount: subtotal + overhead + profit };
+  };
+
+  const updateLineItem = (idx, field, value) => {
+    const updated = result.lineItems.map((li, i) => {
+      if (i !== idx) return li;
+      const newLi = { ...li, [field]: value };
+      if (field === "quantity" || field === "unitPrice") {
+        newLi.totalPrice = (parseFloat(newLi.quantity) || 0) * (parseFloat(newLi.unitPrice) || 0);
+      }
+      if (field === "totalPrice") {
+        newLi.totalPrice = parseFloat(value) || 0;
+      }
+      return newLi;
+    });
+    const totals = recalcTotals(updated);
+    setResult({ ...result, lineItems: updated, ...totals });
+  };
+
+  const addLineItem = () => {
+    const updated = [...result.lineItems, { trade: "", description: "New line item", quantity: 1, unit: "LS", unitPrice: 0, totalPrice: 0 }];
+    const totals = recalcTotals(updated);
+    setResult({ ...result, lineItems: updated, ...totals });
+  };
+
+  const removeLineItem = (idx) => {
+    const updated = result.lineItems.filter((_, i) => i !== idx);
+    const totals = recalcTotals(updated);
+    setResult({ ...result, lineItems: updated, ...totals });
   };
 
   const toText = (r) => [
@@ -99,7 +139,7 @@ export default function ChangeOrderGPT({ activeProject }) {
     r.contractLanguage,
   ].join("\n");
 
-  const toEmailHtml = (r) => `
+  const toEmailHtml = (r, approvalToken) => `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="background: #1a1f2e; padding: 20px; border-radius: 8px 8px 0 0;">
         <div style="color: #f0a500; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px;">Change Order #${r.changeOrderNumber}</div>
@@ -109,12 +149,11 @@ export default function ChangeOrderGPT({ activeProject }) {
       <div style="background: #f8f9fc; padding: 20px; border: 1px solid #e0e4ef;">
         <p style="color: #1a1f2e; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">${r.description}</p>
         <p style="color: #606880; font-size: 13px; line-height: 1.6; margin-bottom: 20px;"><strong>Reason:</strong> ${r.reason}</p>
-
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
           <thead>
             <tr style="background: #1a1f2e;">
-              <th style="padding: 10px 12px; text-align: left; color: #909ab0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;">Description</th>
-              <th style="padding: 10px 12px; text-align: right; color: #909ab0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;">Amount</th>
+              <th style="padding: 10px 12px; text-align: left; color: #909ab0; font-size: 11px; text-transform: uppercase;">Description</th>
+              <th style="padding: 10px 12px; text-align: right; color: #909ab0; font-size: 11px; text-transform: uppercase;">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -129,21 +168,22 @@ export default function ChangeOrderGPT({ activeProject }) {
             `).join("")}
           </tbody>
         </table>
-
-        <div style="background: #1a1f2e; padding: 16px 20px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
-          <div style="color: #ffffff; font-size: 16px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em;">Total Change Order Amount</div>
+        <div style="background: #1a1f2e; padding: 16px 20px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+          <div style="color: #ffffff; font-size: 16px; font-weight: bold;">Total Change Order Amount</div>
           <div style="color: #f0a500; font-size: 22px; font-family: monospace;">${fmt(r.totalAmount)}</div>
         </div>
-
-        <div style="margin-top: 16px; padding: 14px; background: #fff8e6; border: 1px solid rgba(240,165,0,0.3); border-radius: 6px;">
-          <div style="font-size: 11px; color: #c47f00; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">Schedule Impact</div>
-          <div style="font-size: 14px; color: #1a1f2e;">+${r.daysAdded} calendar days added to project schedule</div>
+        <div style="margin-bottom: 16px; padding: 14px; background: #fff8e6; border: 1px solid rgba(240,165,0,0.3); border-radius: 6px;">
+          <div style="font-size: 13px; color: #1a1f2e;">Schedule Impact: <strong>+${r.daysAdded} calendar days</strong></div>
         </div>
-
-        <div style="margin-top: 20px; padding: 14px; background: #f0f2f5; border-radius: 6px;">
-          <div style="font-size: 11px; color: #909ab0; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">Contract Language</div>
-          <div style="font-size: 12px; color: #606880; font-style: italic; line-height: 1.7;">${r.contractLanguage}</div>
+        ${approvalToken ? `
+        <div style="text-align: center; margin-top: 24px; padding: 20px; background: #ffffff; border: 2px solid #f0a500; border-radius: 8px;">
+          <div style="font-size: 15px; color: #1a1f2e; margin-bottom: 16px; font-weight: bold;">Please review and approve this change order</div>
+          <a href="${window.location.origin}/approve/${approvalToken}" style="background: #f0a500; color: #000; padding: 14px 32px; text-decoration: none; font-weight: bold; font-size: 15px; border-radius: 6px; display: inline-block;">
+            ✓ Approve Change Order
+          </a>
+          <div style="font-size: 11px; color: #909ab0; margin-top: 12px;">By clicking approve, you authorize this change order and agree to the additional cost.</div>
         </div>
+        ` : ""}
       </div>
       <div style="background: #f0f2f5; padding: 16px 20px; border-radius: 0 0 8px 8px; text-align: center;">
         <div style="font-size: 12px; color: #909ab0;">Sent via JobSiteGPT · Construction AI Suite</div>
@@ -151,25 +191,26 @@ export default function ChangeOrderGPT({ activeProject }) {
     </div>
   `;
 
-  const sendEmail = async () => {
-    const emailTo = cliEmail || clientEmail;
+  const sendEmail = async (withApproval = false) => {
+    const emailTo = cliEmail;
     if (!emailTo) { showToast("No client email — add one to the project first."); return; }
     setSending(true);
     try {
+      const approvalToken = withApproval ? `${result.changeOrderNumber}-${Date.now()}` : null;
       const res = await fetch("/api/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: emailTo,
-          subject: `Change Order #${result.changeOrderNumber} — ${result.title}`,
-          html: toEmailHtml(result),
+          subject: `Change Order #${result.changeOrderNumber} — ${result.title}${withApproval ? " (Approval Required)" : ""}`,
+          html: toEmailHtml(result, approvalToken),
           from_name: "JobSiteGPT",
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Email failed");
       setEmailSent(true);
-      showToast("Email sent to client!");
+      showToast(withApproval ? "Approval request sent to client!" : "Email sent to client!");
     } catch (e) {
       showToast(`Email failed: ${e.message}`);
     } finally {
@@ -179,16 +220,7 @@ export default function ChangeOrderGPT({ activeProject }) {
 
   return (
     <div className="fade-up">
-      {/* Active project banner */}
-      {activeProject && (
-        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14 }}>📁</span>
-          <div>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
-            <div style={{ fontSize: 12, color: "#909ab0" }}>{[activeProject.client_name, activeProject.client_email].filter(Boolean).join(" · ")}</div>
-          </div>
-        </div>
-      )}
+      <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
 
       {(status === "idle" || status === "error") && (
         <>
@@ -215,6 +247,12 @@ export default function ChangeOrderGPT({ activeProject }) {
             </div>
           )}
 
+          {markup > 0 && (
+            <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "10px 14px", marginBottom: 22, borderRadius: 6, fontSize: 12, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>
+              Using {markup}% markup from project settings for overhead + profit
+            </div>
+          )}
+
           <div className="section-label">What Changed</div>
           <div className="input-group">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -224,7 +262,7 @@ export default function ChangeOrderGPT({ activeProject }) {
               </button>
             </div>
             <textarea
-              placeholder="e.g. Client requested to upgrade from LVP to hardwood flooring in all three bedrooms. Also adding under-cabinet lighting in kitchen — wasn't in original scope."
+              placeholder="e.g. Client requested to upgrade from LVP to hardwood flooring in all three bedrooms."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               style={{ minHeight: 130 }}
@@ -256,59 +294,72 @@ export default function ChangeOrderGPT({ activeProject }) {
               {result.projectName} · {result.clientName} · +{result.daysAdded} days schedule impact
             </div>
             <div className="result-actions">
-              <button className="btn btn-primary" onClick={() => downloadTxt(`CO_${result.changeOrderNumber}_${result.projectName.replace(/\s+/g, "_")}.txt`, toText(result))}>
-                ⬇ Download CO
+              <button className="btn btn-primary" onClick={() => downloadTxt(`CO_${result.changeOrderNumber}.txt`, toText(result))}>⬇ Download</button>
+              <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>⧉ Copy</button>
+              <button className="btn" disabled={sending} onClick={() => sendEmail(false)}>
+                {sending ? "Sending…" : emailSent ? "✓ Sent" : "✉ Email Client"}
               </button>
-              <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>
-                ⧉ Copy
-              </button>
-              <button
-                className="btn"
-                style={emailSent ? { borderColor: "#27ae60", color: "#27ae60" } : {}}
-                disabled={sending}
-                onClick={sendEmail}
-              >
-                {sending ? "Sending…" : emailSent ? "✓ Email Sent" : "✉ Email to Client"}
+              <button className="btn" style={{ borderColor: "rgba(240,165,0,0.4)", color: "#c47f00" }} disabled={sending} onClick={() => sendEmail(true)}>
+                ✍ Send for Approval
               </button>
               <button className="btn btn-ghost" onClick={reset}>↩ New CO</button>
             </div>
           </div>
 
           <div className="stat-row">
-            <div className="stat-card">
-              <div className="stat-label">Total Amount</div>
-              <div className="stat-value" style={{ fontSize: 22 }}>{`$${Number(result.totalAmount).toLocaleString()}`}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Line Items</div>
-              <div className="stat-value">{result.lineItems.length}</div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-label">Schedule Impact</div>
-              <div className="stat-value">+{result.daysAdded}d</div>
-            </div>
+            <div className="stat-card"><div className="stat-label">Total Amount</div><div className="stat-value" style={{ fontSize: 22 }}>{`$${Number(result.totalAmount).toLocaleString()}`}</div></div>
+            <div className="stat-card"><div className="stat-label">Line Items</div><div className="stat-value">{result.lineItems.length}</div></div>
+            <div className="stat-card"><div className="stat-label">Schedule Impact</div><div className="stat-value">+{result.daysAdded}d</div></div>
           </div>
 
           <div className="co-section">
             <div className="co-section-title">Description</div>
-            <div style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 16 }}>{result.description}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 16, color: "#1a1f2e" }}>{result.description}</div>
             <div className="co-section-title">Reason for Change</div>
             <div style={{ fontSize: 13, lineHeight: 1.7, color: "#606880" }}>{result.reason}</div>
           </div>
 
           <div className="co-section">
-            <div className="co-section-title">Cost Breakdown</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div className="co-section-title" style={{ margin: 0 }}>Cost Breakdown</div>
+              <button className="btn" style={{ padding: "5px 12px", fontSize: 11 }} onClick={addLineItem}>+ Add Line</button>
+            </div>
+
             {result.lineItems.map((li, i) => (
-              <div key={i} className="co-line">
-                <div>
-                  <div className="co-line-desc">{li.description}</div>
-                  <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>
-                    {li.trade} · {li.quantity} {li.unit} @ {fmt(li.unitPrice)}
+              <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid #f0f2f5" }}>
+                {editingLine === i ? (
+                  // Edit mode
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div className="row-2">
+                      <div><label className="field-label">Trade</label><input type="text" value={li.trade} onChange={e => updateLineItem(i, "trade", e.target.value)} style={{ fontSize: 13 }} /></div>
+                      <div><label className="field-label">Description</label><input type="text" value={li.description} onChange={e => updateLineItem(i, "description", e.target.value)} style={{ fontSize: 13 }} /></div>
+                    </div>
+                    <div className="row-3">
+                      <div><label className="field-label">Qty</label><input type="number" value={li.quantity} onChange={e => updateLineItem(i, "quantity", e.target.value)} style={{ fontSize: 13 }} /></div>
+                      <div><label className="field-label">Unit</label><input type="text" value={li.unit} onChange={e => updateLineItem(i, "unit", e.target.value)} style={{ fontSize: 13 }} /></div>
+                      <div><label className="field-label">Unit Price</label><input type="number" value={li.unitPrice} onChange={e => updateLineItem(i, "unitPrice", e.target.value)} style={{ fontSize: 13 }} /></div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 11 }} onClick={() => setEditingLine(null)}>✓ Done</button>
+                      <button className="btn" style={{ padding: "6px 14px", fontSize: 11, color: "#e74c3c", borderColor: "rgba(231,76,60,0.3)" }} onClick={() => removeLineItem(i)}>Remove</button>
+                    </div>
                   </div>
-                </div>
-                <div className="co-line-price">{fmt(li.totalPrice)}</div>
+                ) : (
+                  // View mode
+                  <div className="co-line" style={{ padding: 0, borderBottom: "none" }}>
+                    <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setEditingLine(i)}>
+                      <div className="co-line-desc">{li.description}</div>
+                      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>
+                        {li.trade} · {li.quantity} {li.unit} @ {fmt(li.unitPrice)}
+                        <span style={{ marginLeft: 8, color: "#c0c8d8" }}>✏ click to edit</span>
+                      </div>
+                    </div>
+                    <div className="co-line-price">{fmt(li.totalPrice)}</div>
+                  </div>
+                )}
               </div>
             ))}
+
             <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
               {[["Subtotal", result.subtotal], ["Overhead", result.overhead], ["Profit", result.profit]].map(([l, v]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#909ab0" }}>
@@ -334,6 +385,22 @@ export default function ChangeOrderGPT({ activeProject }) {
               <div style={{ fontSize: 13, color: "#606880" }}>{result.notes}</div>
             </div>
           )}
+
+          <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.2)", padding: "16px 20px", borderRadius: 8, marginTop: 8 }}>
+            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e", marginBottom: 6 }}>Client Approval</div>
+            <div style={{ fontSize: 12, color: "#606880", marginBottom: 14 }}>
+              Send for approval to get a digital sign-off from your client. They'll receive an email with an approval button. You'll get a copy once they approve.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn btn-primary" disabled={sending || !cliEmail} onClick={() => sendEmail(true)}>
+                ✍ Send for Client Approval
+              </button>
+              <button className="btn" disabled={sending || !cliEmail} onClick={() => sendEmail(false)}>
+                ✉ Send Copy Only
+              </button>
+              {!cliEmail && <span style={{ fontSize: 12, color: "#e74c3c", alignSelf: "center" }}>Add client email to project first</span>}
+            </div>
+          </div>
         </>
       )}
 

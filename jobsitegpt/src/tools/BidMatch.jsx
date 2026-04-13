@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { callClaude } from "../lib/api";
-import { toBase64 } from "../lib/api";
+import { callClaude, toBase64 } from "../lib/api";
 import { useToast } from "../lib/hooks";
 import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
   "Uploading bid documents…",
@@ -13,7 +13,7 @@ const STEPS = [
 
 const fmt = (p) => p ? `$${Number(p).toLocaleString()}` : "N/A";
 
-export default function BidMatch({ activeProject }) {
+export default function BidMatch({ activeProject, onProjectChange }) {
   const [bids, setBids] = useState([
     { name: "", files: [], b64: {} },
     { name: "", files: [], b64: {} },
@@ -81,8 +81,7 @@ export default function BidMatch({ activeProject }) {
       timers.forEach(clearTimeout);
       const r = await callClaude(
         [{ role: "user", content }],
-        "You are an expert construction cost estimator and procurement specialist. Analyze bids objectively. Grade A=excellent B=good C=average D=below average F=poor. Return valid JSON only, no markdown.",
-        5000
+        "You are an expert construction cost estimator and procurement specialist. Analyze bids objectively. Grade A=excellent B=good C=average D=below average F=poor. Return valid JSON only, no markdown."
       );
       setResult(r); setStatus("done");
     } catch (e) {
@@ -101,16 +100,7 @@ export default function BidMatch({ activeProject }) {
 
   return (
     <div className="fade-up">
-      {/* Active project banner */}
-      {activeProject && (
-        <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "12px 16px", marginBottom: 22, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 14 }}>📁</span>
-          <div>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{activeProject.name}</div>
-            <div style={{ fontSize: 12, color: "#909ab0" }}>{[activeProject.client_name, activeProject.address].filter(Boolean).join(" · ")}</div>
-          </div>
-        </div>
-      )}
+      <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
 
       {(status === "idle" || status === "error") && (
         <>

@@ -16,7 +16,20 @@ import FieldLedger from "./tools/FieldLedger";
 
 function AppShell({ user }) {
   const location = useLocation();
-  const [activeProject, setActiveProject] = useState(null);
+  const [activeProject, setActiveProject] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("jsg_active_project");
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+
+  const setProject = (p) => {
+    setActiveProject(p);
+    if (p) sessionStorage.setItem("jsg_active_project", JSON.stringify(p));
+    else sessionStorage.removeItem("jsg_active_project");
+  };
+
+  const toolProps = { activeProject, onProjectChange: setProject };
 
   return (
     <>
@@ -27,12 +40,12 @@ function AppShell({ user }) {
           <Routes>
             <Route path="/"            element={<Dashboard user={user} />} />
             <Route path="/projects"    element={<Projects />} />
-            <Route path="/projects/:id" element={<ProjectDetail onProjectLoad={setActiveProject} />} />
-            <Route path="/scope"       element={<ScopeGPT activeProject={activeProject} />} />
-            <Route path="/schedule"    element={<ScheduleGPT activeProject={activeProject} />} />
-            <Route path="/bidmatch"    element={<BidMatch activeProject={activeProject} />} />
-            <Route path="/changeorder" element={<ChangeOrderGPT activeProject={activeProject} />} />
-            <Route path="/fieldledger" element={<FieldLedger activeProject={activeProject} />} />
+            <Route path="/projects/:id" element={<ProjectDetail onProjectLoad={setProject} />} />
+            <Route path="/scope"       element={<ScopeGPT {...toolProps} />} />
+            <Route path="/schedule"    element={<ScheduleGPT {...toolProps} />} />
+            <Route path="/bidmatch"    element={<BidMatch {...toolProps} />} />
+            <Route path="/changeorder" element={<ChangeOrderGPT {...toolProps} />} />
+            <Route path="/fieldledger" element={<FieldLedger {...toolProps} />} />
             <Route path="*"            element={<Navigate to="/" replace />} />
           </Routes>
         </div>
@@ -59,7 +72,7 @@ export default function App() {
   if (user === undefined) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: "#3a4260" }}>Loading…</div>
+        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "#909ab0" }}>Loading…</div>
       </div>
     );
   }
