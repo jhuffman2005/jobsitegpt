@@ -1,4 +1,4 @@
-export async function callClaude(messages, system, maxTokens = 4000) {
+export async function callClaude(messages, system, maxTokens = 3000) {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
