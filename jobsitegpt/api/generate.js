@@ -14,7 +14,10 @@ export default async function handler(req, res) {
         "x-api-key": process.env.ANTHROPIC_API_KEY,
         "anthropic-version": "2023-06-01",
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify({
+        ...req.body,
+        max_tokens: 16000,
+      }),
     });
 
     const data = await response.json();
