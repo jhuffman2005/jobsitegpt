@@ -37,14 +37,21 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     const timers = STEPS.map((_, i) => setTimeout(() => setStepIdx(i), i * 1800));
     try {
       const content = [];
+
       files.forEach((f) => {
         const data = b64[f.name];
         if (!data) return;
-        if (f.type.startsWith("image/"))
+        if (f.type.startsWith("image/")) {
           content.push({ type: "image", source: { type: "base64", media_type: f.type, data } });
-        else
+        } else if (f.type === "application/json" || f.name.endsWith(".json")) {
+          // JSON files (ScopeGPT exports) — decode and send as text
+          const decoded = atob(data);
+          content.push({ type: "text", text: `ScopeGPT Export:\n${decoded}` });
+        } else {
           content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data } });
+        }
       });
+
 
       const projectContext = activeProject
         ? `Project: "${activeProject.name}" | Client: "${activeProject.client_name || "N/A"}" | Address: "${activeProject.address || "N/A"}" | Type: ${projectType === "remodel" ? "Remodel/Renovation" : "New Construction"}`
