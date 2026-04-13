@@ -50,7 +50,7 @@ export default function ScheduleGPT() {
       const r = await callClaude(
         [{ role: "user", content }],
         `You are an expert construction scheduler. ${projectType === "remodel" ? "Focus on interior trades; only include exterior if documents explicitly call for them." : "Include full sequence: site work, excavation, foundation, framing, exterior, MEP, finishes."} Return valid JSON only, no markdown.`,
-        4000
+        6000
       );
       setResult(r); setStatus("done");
     } catch (e) {
