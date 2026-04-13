@@ -17,11 +17,11 @@ export async function callClaude(messages, system, maxTokens = 3000) {
 
   const data = await res.json();
   const raw = data.content?.find((b) => b.type === "text")?.text || "";
-  
-  // Strip markdown fences and whitespace
+
+  // Strip ALL variations of markdown fences including ```json, ``` json, etc.
   let clean = raw
-    .replace(/```json\n?/g, "")
-    .replace(/```\n?/g, "")
+    .replace(/`{3,}json\s*/gi, "")
+    .replace(/`{3,}\s*/g, "")
     .trim();
 
   // Find the first { and last } to extract JSON even if there's surrounding text
