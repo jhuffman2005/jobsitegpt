@@ -18,18 +18,15 @@ export async function callClaude(messages, system, maxTokens = 3000) {
   const data = await res.json();
   const raw = data.content?.find((b) => b.type === "text")?.text || "";
 
-  // Strip ALL variations of markdown fences including ```json, ``` json, etc.
-  let clean = raw
-    .replace(/`{3,}json\s*/gi, "")
-    .replace(/`{3,}\s*/g, "")
-    .trim();
+  // Extract JSON by finding outermost braces — ignores fences, preamble, anything else
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
 
-  // Find the first { and last } to extract JSON even if there's surrounding text
-  const firstBrace = clean.indexOf("{");
-  const lastBrace = clean.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1) {
-    clean = clean.slice(firstBrace, lastBrace + 1);
+  if (firstBrace === -1 || lastBrace === -1) {
+    throw new Error("AI response was not valid JSON. Try again.");
   }
+
+  const clean = raw.slice(firstBrace, lastBrace + 1);
 
   try {
     return JSON.parse(clean);
