@@ -17,7 +17,19 @@ export async function callClaude(messages, system, maxTokens = 3000) {
 
   const data = await res.json();
   const raw = data.content?.find((b) => b.type === "text")?.text || "";
-  const clean = raw.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+  
+  // Strip markdown fences and whitespace
+  let clean = raw
+    .replace(/```json\n?/g, "")
+    .replace(/```\n?/g, "")
+    .trim();
+
+  // Find the first { and last } to extract JSON even if there's surrounding text
+  const firstBrace = clean.indexOf("{");
+  const lastBrace = clean.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    clean = clean.slice(firstBrace, lastBrace + 1);
+  }
 
   try {
     return JSON.parse(clean);
