@@ -44,7 +44,7 @@ export default function ScopeGPT() {
       const r = await callClaude(
         [{ role: "user", content }],
         "You are an expert GC with 20+ years writing professional scopes of work. Be thorough — 6-12 trades, 3-8 line items each. Return valid JSON only, no markdown.",
-        6000
+        16000
       );
       setResult(r); setStatus("done");
     } catch (e) {
