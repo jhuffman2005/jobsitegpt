@@ -4,6 +4,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    console.log("REQUEST BODY:", JSON.stringify(req.body).substring(0, 300));
+console.log("MAX TOKENS REQUESTED:", req.body.max_tokens);
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
