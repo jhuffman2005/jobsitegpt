@@ -163,15 +163,18 @@ export default function ProjectDetail({ onProjectLoad }) {
 
         <div
           className="upload-zone"
-          style={{ marginBottom: 16 }}
+          style={{ marginBottom: 16, position: "relative" }}
           onClick={() => fileInputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); e.currentTarget.classList.add("drag-over"); }}
+          onDragLeave={e => { e.currentTarget.classList.remove("drag-over"); }}
+          onDrop={e => { e.preventDefault(); e.currentTarget.classList.remove("drag-over"); handleUpload(e.dataTransfer.files); }}
         >
           <input
             ref={fileInputRef}
             type="file"
             multiple
             accept=".pdf,image/*"
-            style={{ display: "none" }}
+            style={{ position: "absolute", opacity: 0, top: 0, left: 0, width: "100%", height: "100%", cursor: "pointer" }}
             onChange={e => handleUpload(e.target.files)}
           />
           <div style={{ fontSize: 24, marginBottom: 8 }}>📎</div>
@@ -214,12 +217,12 @@ export default function ProjectDetail({ onProjectLoad }) {
         ].map(t => (
           <div key={t.to}
             onClick={() => navigate(t.to)}
-            style={{ background: "#131720", border: "1px solid #252d42", padding: "14px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s" }}
+            style={{ background: "#ffffff", border: "1px solid #e0e4ef", padding: "14px 16px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s" }}
             onMouseEnter={e => e.currentTarget.style.borderColor = "#f0a500"}
-            onMouseLeave={e => e.currentTarget.style.borderColor = "#252d42"}
+            onMouseLeave={e => e.currentTarget.style.borderColor = "#e0e4ef"}
           >
             <span style={{ fontSize: 16 }}>{t.icon}</span>
-            <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14 }}>{t.label}</span>
+            <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e" }}>{t.label}</span>
           </div>
         ))}
       </div>

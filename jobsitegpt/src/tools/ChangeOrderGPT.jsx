@@ -62,6 +62,16 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
         "You are an expert construction project manager writing professional change orders. Be specific with line items and pricing. Use current market rates. Return valid JSON only, no markdown."
       );
       setResult(r); setStatus("done"); setEmailSent(false);
+      const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
+      history.unshift({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        projectId: activeProject?.id || null,
+        tool: "ChangeOrderGPT",
+        title: r.title,
+        date: new Date().toISOString(),
+        summary: `CO #${r.changeOrderNumber} · $${Number(r.totalAmount).toLocaleString()} · +${r.daysAdded} days`,
+      });
+      localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
     } catch (e) {
       timers.forEach(clearTimeout);
       setError(e.message);

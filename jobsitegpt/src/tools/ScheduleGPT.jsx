@@ -67,6 +67,16 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
         `You are an expert construction scheduler. ${projectType === "remodel" ? "Focus on interior trades; only include exterior if documents explicitly call for them." : "Include full sequence: site work, excavation, foundation, framing, exterior, MEP, finishes."} Return valid JSON only, no markdown.`
       );
       setResult(r); setStatus("done");
+      const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
+      history.unshift({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        projectId: activeProject?.id || null,
+        tool: "ScheduleGPT",
+        title: r.projectName,
+        date: new Date().toISOString(),
+        summary: `${r.tasks.length} tasks across ${r.phases.length} phases · ${r.totalDays} days`,
+      });
+      localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
     } catch (e) {
       timers.forEach(clearTimeout);
       setError(e.message);

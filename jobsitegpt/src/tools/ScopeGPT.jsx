@@ -54,6 +54,16 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         "You are an expert GC with 20+ years writing professional scopes of work. Be thorough and complete. Return valid JSON only, no markdown, no explanation, no preamble."
       );
       setResult(r); setStatus("done");
+      const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
+      history.unshift({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        projectId: activeProject?.id || null,
+        tool: "ScopeGPT",
+        title: r.projectName,
+        date: new Date().toISOString(),
+        summary: r.overview,
+      });
+      localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
     } catch (e) {
       timers.forEach(clearTimeout);
       setError(e.message);
