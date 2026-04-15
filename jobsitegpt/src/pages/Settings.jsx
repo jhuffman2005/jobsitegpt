@@ -147,7 +147,7 @@ export default function Settings() {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "center" }}>
         <input
           type="text"
           placeholder="Add a cost code…"
@@ -159,6 +159,9 @@ export default function Settings() {
         <button className="btn btn-primary" disabled={!newCode.trim()} onClick={addCode}>
           + Add
         </button>
+        <span style={{ fontSize: 12, color: "#c47f00", fontFamily: "'Inter',sans-serif", fontStyle: "italic" }}>
+          ↑ Don't forget to click "Save Settings" below to save your changes
+        </span>
       </div>
 
       <div style={{
