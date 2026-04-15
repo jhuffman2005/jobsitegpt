@@ -38,9 +38,17 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
   const [loadingPF, setLoadingPF] = useState(new Set());
 
-  // Clear saved result when project changes
+  // Clear saved result when project changes so stale data from a previous project never shows
   useEffect(() => {
     setSelectedPF([]);
+    setResult(null);
+    setStatus("idle");
+    setError("");
+    setProjectName("");
+    setNotes("");
+    setSpecialInstructions("");
+    resetFiles();
+    sessionStorage.removeItem("jsg_scope_result");
   }, [activeProject?.id]);
 
   const projName = activeProject?.name || projectName;
