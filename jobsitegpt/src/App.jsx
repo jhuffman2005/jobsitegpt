@@ -8,6 +8,8 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
+import Settings from "./pages/Settings";
+import Approve from "./pages/Approve";
 import ScopeGPT from "./tools/ScopeGPT";
 import ScheduleGPT from "./tools/ScheduleGPT";
 import BidMatch from "./tools/BidMatch";
@@ -38,15 +40,16 @@ function AppShell({ user }) {
         <PageHeader pathname={location.pathname} activeProject={activeProject} />
         <div className="page-content">
           <Routes>
-            <Route path="/"            element={<Dashboard user={user} />} />
-            <Route path="/projects"    element={<Projects />} />
+            <Route path="/"             element={<Dashboard user={user} />} />
+            <Route path="/projects"     element={<Projects />} />
             <Route path="/projects/:id" element={<ProjectDetail onProjectLoad={setProject} />} />
-            <Route path="/scope"       element={<ScopeGPT {...toolProps} />} />
-            <Route path="/schedule"    element={<ScheduleGPT {...toolProps} />} />
-            <Route path="/bidmatch"    element={<BidMatch {...toolProps} />} />
-            <Route path="/changeorder" element={<ChangeOrderGPT {...toolProps} />} />
-            <Route path="/fieldledger" element={<FieldLedger {...toolProps} />} />
-            <Route path="*"            element={<Navigate to="/" replace />} />
+            <Route path="/settings"     element={<Settings />} />
+            <Route path="/scope"        element={<ScopeGPT {...toolProps} />} />
+            <Route path="/schedule"     element={<ScheduleGPT {...toolProps} />} />
+            <Route path="/bidmatch"     element={<BidMatch {...toolProps} />} />
+            <Route path="/changeorder"  element={<ChangeOrderGPT {...toolProps} />} />
+            <Route path="/fieldledger"  element={<FieldLedger {...toolProps} />} />
+            <Route path="*"             element={<Navigate to="/" replace />} />
           </Routes>
         </div>
       </div>
@@ -68,6 +71,15 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Approve pages are publicly accessible (no auth required)
+  if (window.location.pathname.startsWith("/approve/")) {
+    return (
+      <Routes>
+        <Route path="/approve/:token" element={<Approve />} />
+      </Routes>
+    );
+  }
 
   if (user === undefined) {
     return (

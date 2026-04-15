@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { callClaude, downloadTxt, downloadJson } from "../lib/api";
+import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import { getProjectFileAsBase64, saveGeneration } from "../lib/projects";
+import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
@@ -12,25 +13,71 @@ const STEPS = [
   "Finalizing scope document…",
 ];
 
+// Restore result from sessionStorage on page load (back button support)
+function loadSavedResult() {
+  try {
+    const saved = sessionStorage.getItem("jsg_scope_result");
+    return saved ? JSON.parse(saved) : null;
+  } catch { return null; }
+}
+
 export default function ScopeGPT({ activeProject, onProjectChange }) {
   const navigate = useNavigate();
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [projectType, setProjectType] = useState("Residential Remodel");
   const [notes, setNotes] = useState("");
-  const [status, setStatus] = useState("idle");
+  const [specialInstructions, setSpecialInstructions] = useState("");
+  const [status, setStatus] = useState(() => loadSavedResult() ? "done" : "idle");
   const [stepIdx, setStepIdx] = useState(0);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(loadSavedResult);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
 
+  // Project file picker state
+  const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
+  const [loadingPF, setLoadingPF] = useState(new Set());
+
+  // Clear saved result when project changes
+  useEffect(() => {
+    setSelectedPF([]);
+  }, [activeProject?.id]);
+
   const projName = activeProject?.name || projectName;
+
+  const toggleProjectFile = async (file) => {
+    const exists = selectedPF.find((f) => f.id === file.id);
+    if (exists) {
+      setSelectedPF((p) => p.filter((f) => f.id !== file.id));
+      return;
+    }
+    setLoadingPF((prev) => new Set([...prev, file.id]));
+    try {
+      const base64 = await getProjectFileAsBase64(file.storage_path);
+      setSelectedPF((p) => [...p, { ...file, b64: base64 }]);
+    } catch (e) {
+      showToast("Could not load file: " + e.message);
+    } finally {
+      setLoadingPF((prev) => { const s = new Set(prev); s.delete(file.id); return s; });
+    }
+  };
 
   const generate = async () => {
     setStatus("loading"); setStepIdx(0); setError("");
     const timers = STEPS.map((_, i) => setTimeout(() => setStepIdx(i), i * 1900));
     try {
       const content = [];
+
+      // Project files selected from repository
+      selectedPF.forEach((pf) => {
+        if (!pf.b64) return;
+        if (pf.file_type?.startsWith("image/"))
+          content.push({ type: "image", source: { type: "base64", media_type: pf.file_type, data: pf.b64 } });
+        else
+          content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: pf.b64 } });
+      });
+
+      // Locally uploaded files
       files.forEach((f) => {
         const data = b64[f.name];
         if (!data) return;
@@ -46,14 +93,22 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
       content.push({
         type: "text",
-        text: `${projectContext}\nNotes: ${notes || "None"}\n\nGenerate a complete professional scope of work. Return ONLY valid JSON:\n{"projectName":"string","projectType":"string","projectAddress":"string or null","overview":"string","trades":[{"id":1,"tradeName":"string","contractor":"string","scopeText":"string","lineItems":[{"description":"string","note":"string or null"}]}],"generalConditions":["string"],"exclusions":["string"],"clarifications":["string"],"estimatedDuration":"string","totalLineItemCount":0}`,
+        text: `${projectContext}\nNotes: ${notes || "None"}\n${specialInstructions ? `Special Instructions: ${specialInstructions}\n` : ""}\nGenerate a complete professional scope of work. Return ONLY valid JSON:\n{"projectName":"string","projectType":"string","projectAddress":"string or null","overview":"string","trades":[{"id":1,"tradeName":"string","contractor":"string","scopeText":"string","lineItems":[{"description":"string","note":"string or null"}]}],"generalConditions":["string"],"exclusions":["string"],"clarifications":["string"],"estimatedDuration":"string","totalLineItemCount":0}`,
       });
+
       timers.forEach(clearTimeout);
       const r = await callClaude(
         [{ role: "user", content }],
         "You are an expert GC with 20+ years writing professional scopes of work. Be thorough and complete. Return valid JSON only, no markdown, no explanation, no preamble."
       );
-      setResult(r); setStatus("done");
+
+      setResult(r);
+      setStatus("done");
+
+      // Persist for back-button support
+      sessionStorage.setItem("jsg_scope_result", JSON.stringify(r));
+
+      // localStorage history
       const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
       history.unshift({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -64,6 +119,11 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         summary: r.overview,
       });
       localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
+
+      // Supabase history (if project is active)
+      if (activeProject?.id) {
+        saveGeneration(activeProject.id, "ScopeGPT", r.projectName, r.overview, r);
+      }
     } catch (e) {
       timers.forEach(clearTimeout);
       setError(e.message);
@@ -71,7 +131,17 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     }
   };
 
-  const reset = () => { resetFiles(); setProjectName(""); setNotes(""); setStatus("idle"); setResult(null); setError(""); };
+  const reset = () => {
+    resetFiles();
+    setProjectName(""); setNotes(""); setSpecialInstructions("");
+    setSelectedPF([]); setStatus("idle"); setResult(null); setError("");
+    sessionStorage.removeItem("jsg_scope_result");
+  };
+
+  const goToSchedule = () => {
+    sessionStorage.setItem("jsg_scope_handoff", JSON.stringify(result));
+    navigate("/schedule");
+  };
 
   const toText = (r) => {
     const lines = [`SCOPE OF WORK\n=============\nProject: ${r.projectName}\nType: ${r.projectType}\nDuration: ${r.estimatedDuration}\n\nOVERVIEW\n--------\n${r.overview}\n`];
@@ -113,6 +183,14 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           </div>
 
           <div className="section-label">Plans & Documents</div>
+          {activeProject?.id && (
+            <ProjectFilePicker
+              projectId={activeProject.id}
+              selectedIds={selectedPF.map((f) => f.id)}
+              loadingIds={loadingPF}
+              onToggle={toggleProjectFile}
+            />
+          )}
           <div className="input-group">
             <UploadZone files={files} onAdd={add} onRemove={remove} hint="PDF plans, permit sets, photos · drag or click" />
           </div>
@@ -126,6 +204,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
+
+          <SpecialInstructions value={specialInstructions} onChange={setSpecialInstructions} />
 
           {error && <div className="error-box">⚠ {error}</div>}
           <button className="btn btn-primary btn-lg" disabled={!projName.trim()} onClick={generate}>
@@ -146,18 +226,22 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
             <div className="result-actions">
               <button className="btn btn-primary" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ Download</button>
               <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>⧉ Copy</button>
-              <button className="btn" onClick={() => { downloadJson(`${result.projectName.replace(/\s+/g, "_")}_ScopeExport.json`, result); showToast("Exported!"); }}>🔗 Export → ScheduleGPT</button>
               <button className="btn btn-ghost" onClick={reset}>↩ New Scope</button>
             </div>
           </div>
 
+          {/* Schedule handoff — direct navigation, no JSON export required */}
           <div className="handoff-banner">
-            <div style={{ fontSize: 22 }}>🔗</div>
+            <div style={{ fontSize: 22 }}>📅</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to schedule this project?</div>
-              <div style={{ fontSize: 12, color: "#606880" }}>Export the JSON and import it in ScheduleGPT to auto-generate your Gantt chart.</div>
+              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to build the Gantt chart?</div>
+              <div style={{ fontSize: 12, color: "#606880" }}>Scope data passes automatically — no download needed.</div>
             </div>
-            <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={() => navigate("/schedule")}>
+            <button
+              className="btn"
+              style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }}
+              onClick={goToSchedule}
+            >
               Open ScheduleGPT →
             </button>
           </div>
@@ -202,6 +286,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
           <div className="result-actions" style={{ marginTop: 24 }}>
             <button className="btn btn-primary" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ Download Scope</button>
+            <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={goToSchedule}>📅 Open in ScheduleGPT</button>
             <button className="btn btn-ghost" onClick={reset}>↩ Start Over</button>
           </div>
         </>

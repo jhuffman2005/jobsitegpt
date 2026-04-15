@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { callClaude, toBase64 } from "../lib/api";
 import { useToast } from "../lib/hooks";
-import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import { ProcessingSteps, UploadZone, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
@@ -19,6 +19,7 @@ export default function BidMatch({ activeProject, onProjectChange }) {
     { name: "", files: [], b64: {} },
   ]);
   const [projectDesc, setProjectDesc] = useState("");
+  const [specialInstructions, setSpecialInstructions] = useState("");
   const [status, setStatus] = useState("idle");
   const [stepIdx, setStepIdx] = useState(0);
   const [result, setResult] = useState(null);
@@ -76,7 +77,7 @@ export default function BidMatch({ activeProject, onProjectChange }) {
       });
       content.push({
         type: "text",
-        text: `Project: ${projectDesc || activeProject?.name || "As described in bid documents"}\n\nAnalyze all bids and return ONLY valid JSON:\n{"projectSummary":"string","recommendedBidIndex":0,"analysis":{"totalBids":0,"pricingRange":{"low":0,"high":0},"averagePrice":0},"bids":[{"bidIndex":0,"contractorName":"string","totalPrice":0,"normalizedPrice":0,"grade":"A","summary":"string","scopeFlags":["string"],"inclusions":["string"],"exclusions":["string"],"redFlags":["string"],"strengths":["string"]}],"scopeGaps":["string"],"recommendation":"string"}`,
+        text: `Project: ${projectDesc || activeProject?.name || "As described in bid documents"}\n${specialInstructions ? `Special Instructions: ${specialInstructions}\n` : ""}\nAnalyze all bids and return ONLY valid JSON:\n{"projectSummary":"string","recommendedBidIndex":0,"analysis":{"totalBids":0,"pricingRange":{"low":0,"high":0},"averagePrice":0},"bids":[{"bidIndex":0,"contractorName":"string","totalPrice":0,"normalizedPrice":0,"grade":"A","summary":"string","scopeFlags":["string"],"inclusions":["string"],"exclusions":["string"],"redFlags":["string"],"strengths":["string"]}],"scopeGaps":["string"],"recommendation":"string"}`,
       });
       timers.forEach(clearTimeout);
       const r = await callClaude(
@@ -139,6 +140,8 @@ export default function BidMatch({ activeProject, onProjectChange }) {
           {bids.length < 5 && (
             <button className="btn" style={{ marginBottom: 22 }} onClick={addBid}>+ Add Another Bid</button>
           )}
+
+          <SpecialInstructions value={specialInstructions} onChange={setSpecialInstructions} />
 
           {error && <div className="error-box">⚠ {error}</div>}
           <button className="btn btn-primary btn-lg" disabled={!canGenerate} onClick={generate}>

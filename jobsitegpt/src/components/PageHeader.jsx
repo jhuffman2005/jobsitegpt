@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 const META = {
   "/":            { badge: "HOME",    title: "Dashboard",      sub: "JobSiteGPT Beta" },
   "/projects":    { badge: "PROJECTS", title: "Projects",      sub: "Manage your jobs" },
+  "/settings":    { badge: "SETTINGS", title: "Settings",      sub: "Account & cost codes" },
   "/scope":       { badge: "01 / 05", title: "ScopeGPT",       sub: "Scope of Work Generator" },
   "/schedule":    { badge: "02 / 05", title: "ScheduleGPT",    sub: "Gantt Chart Generator" },
   "/bidmatch":    { badge: "03 / 05", title: "BidMatch",       sub: "Bid Leveler & Comparison" },
