@@ -101,14 +101,14 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const onCodeFocus = () => {
     setAcFocused(true);
     const codes = allCodes();
-    setAcList(codes.slice(0, 8));
+    setAcList(codes);
     setAcIdx(-1);
   };
 
   const onCodeInput = (val) => {
     setLogCode(val);
-    if (!val.trim()) { setAcList(allCodes().slice(0, 8)); return; }
-    setAcList(allCodes().filter((c) => c.toLowerCase().includes(val.toLowerCase())).slice(0, 8));
+    if (!val.trim()) { setAcList(allCodes()); return; }
+    setAcList(allCodes().filter((c) => c.toLowerCase().includes(val.toLowerCase())));
     setAcIdx(-1);
   };
 
@@ -214,7 +214,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                   <textarea value={voiceText} onChange={(e) => setVoiceText(e.target.value)} placeholder='Speak or type: "Paid Home Depot $340 cash, framing lumber"' style={{ flex: 1, minHeight: 70 }} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <button className={`voice-btn${isRecording ? " recording" : ""}`} onClick={toggleVoice}>{isRecording ? "⏹ Stop" : "🎤 Record"}</button>
-                    <button className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12 }} disabled={!voiceText.trim()} onClick={parseVoice}>Parse →</button>
+                    <button className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12 }} disabled={!voiceText.trim()} onClick={parseVoice}>Fill Fields →</button>
                   </div>
                 </div>
                 {voiceStatus && <div style={{ fontSize: 12, color: voiceStatus.startsWith("✓") ? "#27ae60" : "#909ab0", fontFamily: "'Inter',sans-serif" }}>{voiceStatus}</div>}

@@ -216,6 +216,70 @@ export default function ProjectDetail({ onProjectLoad }) {
           {(() => {
             const TOOL_ORDER = ["ScopeGPT", "ScheduleGPT", "ChangeOrderGPT", "BidMatch", "FieldLedger"];
             const TOOL_ICONS = { ScopeGPT: "📋", ScheduleGPT: "📅", ChangeOrderGPT: "✏", BidMatch: "⚖", FieldLedger: "📒" };
+            const TOOL_ROUTES = {
+              ScopeGPT: "/scope",
+              ScheduleGPT: "/schedule",
+              ChangeOrderGPT: "/changeorder",
+              BidMatch: "/bidmatch",
+              FieldLedger: "/fieldledger",
+            };
+            const TOOL_RESTORE_KEYS = {
+              ScopeGPT: "jsg_scope_result",
+              ScheduleGPT: "jsg_schedule_result",
+              ChangeOrderGPT: "jsg_changeorder_result",
+              BidMatch: "jsg_bidmatch_result",
+              FieldLedger: "jsg_fieldledger_result",
+            };
+            const escapeHtml = (s) =>
+              String(s ?? "")
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+            const renderHtml = (tool, g) => {
+              const data = g.result_data || {};
+              const title = escapeHtml(g.title || tool);
+              const date = new Date(g.created_at).toLocaleString();
+              const body = `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+              return `<!doctype html><html><head><meta charset="utf-8"><title>${title} — ${escapeHtml(tool)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:32px auto;padding:0 20px;color:#1a1f2e;}h1{font-size:22px;margin:0 0 4px;}h2{font-size:14px;color:#606880;margin:0 0 20px;font-weight:500;}.summary{background:#f7f8fb;border:1px solid #e0e4ef;padding:14px 16px;border-radius:6px;margin-bottom:20px;line-height:1.55;font-size:13px;color:#1a1f2e;}@media print{body{margin:0;}}</style></head><body><h1>${title}</h1><h2>${escapeHtml(tool)} · ${escapeHtml(date)}</h2>${g.summary ? `<div class="summary">${escapeHtml(g.summary)}</div>` : ""}${body}</body></html>`;
+            };
+            const downloadBlob = (content, filename, mime) => {
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+              a.download = filename;
+              a.click();
+            };
+            const exportJson = (tool, g) => {
+              downloadBlob(
+                JSON.stringify(g.result_data, null, 2),
+                `${tool}_${g.title?.replace(/\s+/g, "_") || "export"}.json`,
+                "application/json"
+              );
+            };
+            const exportHtml = (tool, g) => {
+              downloadBlob(
+                renderHtml(tool, g),
+                `${tool}_${g.title?.replace(/\s+/g, "_") || "export"}.html`,
+                "text/html"
+              );
+            };
+            const exportPdf = (tool, g) => {
+              // Open a printable HTML view and trigger the browser's print dialog
+              // so the user can choose "Save as PDF" (no external PDF library required).
+              const w = window.open("", "_blank");
+              if (!w) { setError("Popup blocked — allow popups to export PDF."); return; }
+              w.document.open();
+              w.document.write(renderHtml(tool, g));
+              w.document.close();
+              w.focus();
+              setTimeout(() => { try { w.print(); } catch {} }, 300);
+            };
+            const viewInApp = (tool, g) => {
+              const key = TOOL_RESTORE_KEYS[tool];
+              const route = TOOL_ROUTES[tool];
+              if (key && g.result_data) {
+                try { sessionStorage.setItem(key, JSON.stringify(g.result_data)); } catch {}
+              }
+              if (route) navigate(route);
+            };
             const grouped = {};
             generations.forEach((g) => {
               if (!grouped[g.tool]) grouped[g.tool] = [];
@@ -245,20 +309,40 @@ export default function ProjectDetail({ onProjectLoad }) {
                     {expandedGen === g.id && (
                       <div style={{ padding: "0 16px 14px", borderTop: "1px solid #f0f2f5" }}>
                         <div style={{ fontSize: 12, color: "#606880", lineHeight: 1.6, marginTop: 10 }}>{g.summary}</div>
-                        {g.result_data && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                           <button
-                            className="btn"
-                            style={{ marginTop: 10, padding: "5px 12px", fontSize: 11 }}
-                            onClick={() => {
-                              const a = document.createElement("a");
-                              a.href = URL.createObjectURL(new Blob([JSON.stringify(g.result_data, null, 2)], { type: "application/json" }));
-                              a.download = `${tool}_${g.title?.replace(/\s+/g, "_") || "export"}.json`;
-                              a.click();
-                            }}
+                            className="btn btn-primary"
+                            style={{ padding: "5px 12px", fontSize: 11 }}
+                            onClick={() => viewInApp(tool, g)}
                           >
-                            ⬇ Export JSON
+                            ↗ View in {tool}
                           </button>
-                        )}
+                          {g.result_data && (
+                            <>
+                              <button
+                                className="btn"
+                                style={{ padding: "5px 12px", fontSize: 11 }}
+                                onClick={() => exportPdf(tool, g)}
+                              >
+                                ⬇ Export PDF
+                              </button>
+                              <button
+                                className="btn"
+                                style={{ padding: "5px 12px", fontSize: 11 }}
+                                onClick={() => exportHtml(tool, g)}
+                              >
+                                ⬇ Export HTML
+                              </button>
+                              <button
+                                className="btn"
+                                style={{ padding: "5px 12px", fontSize: 11 }}
+                                onClick={() => exportJson(tool, g)}
+                              >
+                                ⬇ Export JSON
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
