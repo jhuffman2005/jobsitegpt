@@ -223,23 +223,115 @@ export default function ProjectDetail({ onProjectLoad }) {
               BidMatch: "/bidmatch",
               FieldLedger: "/fieldledger",
             };
-            const TOOL_RESTORE_KEYS = {
-              ScopeGPT: "jsg_scope_result",
-              ScheduleGPT: "jsg_schedule_result",
-              ChangeOrderGPT: "jsg_changeorder_result",
-              BidMatch: "jsg_bidmatch_result",
-              FieldLedger: "jsg_fieldledger_result",
+            // Tools that support hydrating a saved generation via ?historyId= URL param
+            const TOOL_SUPPORTS_HISTORY = {
+              ScopeGPT: true,
+              ScheduleGPT: true,
+              ChangeOrderGPT: true,
+              BidMatch: false,
+              FieldLedger: false,
             };
             const escapeHtml = (s) =>
               String(s ?? "")
                 .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
                 .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+            const fmtMoney = (n) =>
+              `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            const renderToolBody = (tool, d) => {
+              if (!d) return "";
+              if (tool === "ScopeGPT") {
+                const meta = [d.projectType, d.projectAddress, d.estimatedDuration].filter(Boolean).map(escapeHtml).join(" · ");
+                const trades = (d.trades || []).map((t) => `
+                  <section class="block">
+                    <div class="block-hdr"><span class="num">#${escapeHtml(String(t.id || "").padStart(2, "0"))}</span><span class="ttl">${escapeHtml(t.tradeName || "")}</span>${t.contractor ? `<span class="badge">${escapeHtml(t.contractor)}</span>` : ""}</div>
+                    ${t.scopeText ? `<p class="scope-text">${escapeHtml(t.scopeText)}</p>` : ""}
+                    ${(t.lineItems || []).length ? `<ul class="li-list">${t.lineItems.map((li) => `<li><span class="li-desc">${escapeHtml(li.description || "")}</span>${li.note ? `<span class="li-note">${escapeHtml(li.note)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+                  </section>`).join("");
+                const list = (label, arr) => (arr?.length
+                  ? `<section class="block"><h3>${label}</h3><ul class="plain">${arr.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul></section>` : "");
+                return `
+                  ${meta ? `<div class="meta">${meta}</div>` : ""}
+                  ${d.overview ? `<section class="block"><h3>Overview</h3><p>${escapeHtml(d.overview)}</p></section>` : ""}
+                  ${trades ? `<h2 class="section">Scope by Trade</h2>${trades}` : ""}
+                  ${list("General Conditions", d.generalConditions)}
+                  ${list("Exclusions", d.exclusions)}
+                  ${list("Clarifications", d.clarifications)}
+                `;
+              }
+              if (tool === "ChangeOrderGPT") {
+                const lines = (d.lineItems || []).map((li) => `
+                  <tr><td>${escapeHtml(li.trade || "")}</td><td>${escapeHtml(li.description || "")}</td><td class="num">${Number(li.quantity || 0)}</td><td>${escapeHtml(li.unit || "")}</td><td class="num">${fmtMoney(li.unitPrice)}</td><td class="num">${fmtMoney(li.totalPrice)}</td></tr>`).join("");
+                return `
+                  <div class="meta">CO #${escapeHtml(d.changeOrderNumber || "")}${d.date ? ` · ${escapeHtml(d.date)}` : ""}${d.clientName ? ` · Client: ${escapeHtml(d.clientName)}` : ""}</div>
+                  ${d.description ? `<section class="block"><h3>Description</h3><p>${escapeHtml(d.description)}</p></section>` : ""}
+                  ${d.reason ? `<section class="block"><h3>Reason</h3><p>${escapeHtml(d.reason)}</p></section>` : ""}
+                  ${lines ? `<section class="block"><h3>Line Items</h3><table class="tbl"><thead><tr><th>Trade</th><th>Description</th><th>Qty</th><th>Unit</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>${lines}</tbody></table></section>` : ""}
+                  <section class="block totals">
+                    <div><span>Subtotal</span><b>${fmtMoney(d.subtotal)}</b></div>
+                    <div><span>Overhead</span><b>${fmtMoney(d.overhead)}</b></div>
+                    <div><span>Profit</span><b>${fmtMoney(d.profit)}</b></div>
+                    <div class="grand"><span>Total</span><b>${fmtMoney(d.totalAmount)}</b></div>
+                    ${d.daysAdded ? `<div><span>Days Added</span><b>+${escapeHtml(String(d.daysAdded))}</b></div>` : ""}
+                  </section>
+                  ${d.contractLanguage ? `<section class="block"><h3>Contract Language</h3><p>${escapeHtml(d.contractLanguage)}</p></section>` : ""}
+                  ${d.notes ? `<section class="block"><h3>Notes</h3><p>${escapeHtml(d.notes)}</p></section>` : ""}
+                `;
+              }
+              if (tool === "ScheduleGPT") {
+                const tasks = (d.tasks || []).map((t) => `
+                  <tr><td class="num">${escapeHtml(String(t.id || ""))}</td><td>${escapeHtml(t.task || "")}</td><td>${escapeHtml(t.phase || "")}</td><td>${escapeHtml(t.trade || "")}</td><td class="num">Day ${escapeHtml(String(t.startDay || ""))}</td><td class="num">${escapeHtml(String(t.durationDays || ""))}d</td><td>${escapeHtml((t.dependencies || []).join(", ") || "—")}</td><td>${escapeHtml(t.notes || "")}</td></tr>`).join("");
+                const subs = (d.subcontractors || []).map((s) => `
+                  <tr><td>${escapeHtml(s.trade || "")}</td><td>${escapeHtml(s.phase || "")}</td><td class="num">${escapeHtml(String(s.estimatedDays || ""))}d</td><td>${escapeHtml((s.recommendedSubTypes || []).join(", "))}</td><td>${escapeHtml(s.scope || "")}</td></tr>`).join("");
+                return `
+                  <div class="meta">${d.phases?.length ? `${d.phases.length} phases · ` : ""}${d.tasks?.length || 0} tasks${d.totalDays ? ` · ${d.totalDays} days` : ""}</div>
+                  ${tasks ? `<section class="block"><h3>Tasks</h3><table class="tbl"><thead><tr><th>#</th><th>Task</th><th>Phase</th><th>Trade</th><th>Start</th><th>Duration</th><th>Dependencies</th><th>Notes</th></tr></thead><tbody>${tasks}</tbody></table></section>` : ""}
+                  ${subs ? `<section class="block"><h3>Subcontractors</h3><table class="tbl"><thead><tr><th>Trade</th><th>Phase</th><th>Est. Days</th><th>Recommended Sub Types</th><th>Scope</th></tr></thead><tbody>${subs}</tbody></table></section>` : ""}
+                `;
+              }
+              // Fallback (other tools) — render known-shape fields as definition list
+              const fallback = Object.entries(d).filter(([, v]) => typeof v !== "object" || Array.isArray(v))
+                .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${Array.isArray(v) ? v.map(escapeHtml).join(", ") : escapeHtml(v)}</dd>`).join("");
+              return fallback ? `<dl class="dl">${fallback}</dl>` : "";
+            };
             const renderHtml = (tool, g) => {
-              const data = g.result_data || {};
               const title = escapeHtml(g.title || tool);
               const date = new Date(g.created_at).toLocaleString();
-              const body = `<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:12px;">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
-              return `<!doctype html><html><head><meta charset="utf-8"><title>${title} — ${escapeHtml(tool)}</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:32px auto;padding:0 20px;color:#1a1f2e;}h1{font-size:22px;margin:0 0 4px;}h2{font-size:14px;color:#606880;margin:0 0 20px;font-weight:500;}.summary{background:#f7f8fb;border:1px solid #e0e4ef;padding:14px 16px;border-radius:6px;margin-bottom:20px;line-height:1.55;font-size:13px;color:#1a1f2e;}@media print{body{margin:0;}}</style></head><body><h1>${title}</h1><h2>${escapeHtml(tool)} · ${escapeHtml(date)}</h2>${g.summary ? `<div class="summary">${escapeHtml(g.summary)}</div>` : ""}${body}</body></html>`;
+              const body = renderToolBody(tool, g.result_data);
+              const styles = `
+                *{box-sizing:border-box}
+                body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;max-width:880px;margin:32px auto;padding:0 24px;color:#1a1f2e;line-height:1.55;}
+                h1{font-size:24px;margin:0 0 4px;font-weight:800;letter-spacing:0.02em}
+                h2.section{font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#909ab0;margin:28px 0 10px;font-weight:700}
+                h3{font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#606880;margin:0 0 8px;font-weight:700}
+                .meta{font-size:13px;color:#606880;margin-bottom:18px}
+                .summary{background:#f7f8fb;border:1px solid #e0e4ef;padding:14px 16px;border-radius:6px;margin-bottom:20px;font-size:13px}
+                .block{margin:0 0 18px;padding:14px 16px;border:1px solid #e0e4ef;border-radius:6px;background:#fff;page-break-inside:avoid}
+                .block p{margin:0 0 6px;font-size:13px}
+                .block-hdr{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+                .block-hdr .num{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#909ab0}
+                .block-hdr .ttl{font-weight:700;font-size:14px}
+                .block-hdr .badge{font-size:11px;background:#fff4d6;color:#c47f00;padding:2px 8px;border-radius:10px}
+                .scope-text{font-size:13px;color:#1a1f2e;margin:0 0 8px}
+                .li-list{list-style:none;padding:0;margin:6px 0 0}
+                .li-list li{padding:4px 0;font-size:13px;display:flex;gap:8px;align-items:baseline;border-top:1px dashed #eef0f5}
+                .li-list li:before{content:"▸";color:#f0a500;font-size:10px}
+                .li-desc{flex:1}
+                .li-note{color:#909ab0;font-size:11px;font-style:italic}
+                ul.plain{margin:0;padding-left:18px;font-size:13px}
+                ul.plain li{margin:3px 0}
+                table.tbl{width:100%;border-collapse:collapse;font-size:12px}
+                table.tbl th,table.tbl td{text-align:left;padding:6px 8px;border-bottom:1px solid #e8ebf2;vertical-align:top}
+                table.tbl th{background:#f7f8fb;color:#606880;font-weight:700;font-size:11px;letter-spacing:0.06em;text-transform:uppercase}
+                table.tbl td.num,table.tbl th.num{text-align:right;font-family:ui-monospace,Menlo,monospace}
+                .totals{background:#f7f8fb}
+                .totals>div{display:flex;justify-content:space-between;padding:3px 0;font-size:13px}
+                .totals .grand{border-top:2px solid #1a1f2e;margin-top:6px;padding-top:8px;font-size:15px;font-weight:800}
+                .dl{font-size:13px}
+                .dl dt{font-weight:700;margin-top:6px;color:#606880}
+                .dl dd{margin:0 0 4px}
+                @media print{body{margin:0;padding:16px;max-width:none}.block{break-inside:avoid}}
+              `;
+              return `<!doctype html><html><head><meta charset="utf-8"><title>${title} — ${escapeHtml(tool)}</title><style>${styles}</style></head><body><h1>${title}</h1><div class="meta">${escapeHtml(tool)} · ${escapeHtml(date)}</div>${g.summary ? `<div class="summary">${escapeHtml(g.summary)}</div>` : ""}${body || `<p style="color:#909ab0;font-style:italic">No formatted output available for this generation.</p>`}</body></html>`;
             };
             const downloadBlob = (content, filename, mime) => {
               const a = document.createElement("a");
@@ -273,12 +365,11 @@ export default function ProjectDetail({ onProjectLoad }) {
               setTimeout(() => { try { w.print(); } catch {} }, 300);
             };
             const viewInApp = (tool, g) => {
-              const key = TOOL_RESTORE_KEYS[tool];
               const route = TOOL_ROUTES[tool];
-              if (key && g.result_data) {
-                try { sessionStorage.setItem(key, JSON.stringify(g.result_data)); } catch {}
-              }
-              if (route) navigate(route);
+              if (!route) return;
+              // Pass the generation ID via URL so the tool can fetch & hydrate on mount.
+              if (TOOL_SUPPORTS_HISTORY[tool]) navigate(`${route}?historyId=${encodeURIComponent(g.id)}`);
+              else navigate(route);
             };
             const grouped = {};
             generations.forEach((g) => {

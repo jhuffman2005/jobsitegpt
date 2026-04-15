@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { getProjectFileAsBase64, saveGeneration } from "../lib/projects";
+import { getProjectFileAsBase64, saveGeneration, getGenerationById } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
@@ -23,6 +23,8 @@ function loadSavedResult() {
 
 export default function ScopeGPT({ activeProject, onProjectChange }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const historyId = searchParams.get("historyId");
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [projectType, setProjectType] = useState("Residential Remodel");
@@ -38,8 +40,11 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
   const [loadingPF, setLoadingPF] = useState(new Set());
 
-  // Clear saved result when project changes so stale data from a previous project never shows
+  // Clear saved result when project changes so stale data from a previous project never shows.
+  // Skip clearing if we're hydrating a historical generation via ?historyId= — the hydration
+  // effect below will populate the result view instead.
   useEffect(() => {
+    if (historyId) return;
     setSelectedPF([]);
     setResult(null);
     setStatus("idle");
@@ -50,6 +55,24 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     resetFiles();
     sessionStorage.removeItem("jsg_scope_result");
   }, [activeProject?.id]);
+
+  // Hydrate from a saved generation when navigated here with ?historyId=
+  useEffect(() => {
+    if (!historyId) return;
+    let cancelled = false;
+    (async () => {
+      const g = await getGenerationById(historyId);
+      if (cancelled) return;
+      if (g?.result_data) {
+        setResult(g.result_data);
+        setStatus("done");
+        setError("");
+        // Persist for back-button support, mirroring a freshly-generated result
+        try { sessionStorage.setItem("jsg_scope_result", JSON.stringify(g.result_data)); } catch {}
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [historyId]);
 
   const projName = activeProject?.name || projectName;
 
@@ -144,6 +167,11 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     setProjectName(""); setNotes(""); setSpecialInstructions("");
     setSelectedPF([]); setStatus("idle"); setResult(null); setError("");
     sessionStorage.removeItem("jsg_scope_result");
+    if (historyId) {
+      const p = new URLSearchParams(searchParams);
+      p.delete("historyId");
+      setSearchParams(p, { replace: true });
+    }
   };
 
   const goToSchedule = () => {

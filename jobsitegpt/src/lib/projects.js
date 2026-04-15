@@ -173,19 +173,29 @@ export async function updateApprovalStatus(token, status) {
 
 export async function getUserCostCodes() {
   try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+    // Scope to the authenticated user and use maybeSingle so a missing row is
+    // not treated as an error (first-time users have no row yet).
     const { data, error } = await supabase
       .from("user_cost_codes")
       .select("codes")
-      .single();
-    if (error) return []; // no row yet = empty
-    return data?.codes || [];
-  } catch {
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (error) {
+      console.warn("getUserCostCodes failed:", error.message);
+      return [];
+    }
+    return Array.isArray(data?.codes) ? data.codes : [];
+  } catch (e) {
+    console.warn("getUserCostCodes exception:", e.message);
     return [];
   }
 }
 
 export async function saveUserCostCodes(codes) {
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
   const { error } = await supabase
     .from("user_cost_codes")
     .upsert(
@@ -193,6 +203,27 @@ export async function saveUserCostCodes(codes) {
       { onConflict: "user_id" }
     );
   if (error) throw error;
+}
+
+// ── Single Generation (for "View in tool" click-through) ──────────────────
+
+export async function getGenerationById(id) {
+  if (!id) return null;
+  try {
+    const { data, error } = await supabase
+      .from("project_generations")
+      .select("id, project_id, tool, title, summary, created_at, result_data")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      console.warn("getGenerationById failed:", error.message);
+      return null;
+    }
+    return data;
+  } catch (e) {
+    console.warn("getGenerationById exception:", e.message);
+    return null;
+  }
 }
 
 // ── User Settings ─────────────────────────────────────────────────────────
