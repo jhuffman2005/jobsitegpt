@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
@@ -38,9 +38,20 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
   const [loadingPF, setLoadingPF] = useState(new Set());
 
-  // Clear saved result when project changes
+  // Clear scope when active project changes (not on initial mount)
+  const prevProjectIdRef = useRef(undefined);
   useEffect(() => {
+    if (prevProjectIdRef.current === undefined) {
+      prevProjectIdRef.current = activeProject?.id;
+      return;
+    }
+    if (prevProjectIdRef.current === activeProject?.id) return;
+    prevProjectIdRef.current = activeProject?.id;
     setSelectedPF([]);
+    setResult(null);
+    setStatus("idle");
+    setError("");
+    sessionStorage.removeItem("jsg_scope_result");
   }, [activeProject?.id]);
 
   const projName = activeProject?.name || projectName;
