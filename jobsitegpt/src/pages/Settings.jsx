@@ -105,7 +105,7 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div style={{ color: "#909ab0", fontFamily: "'DM Mono',monospace", fontSize: 13 }}>
+      <div style={{ color: "#909ab0", fontFamily: "'Inter',sans-serif", fontSize: 13 }}>
         Loading settings…
       </div>
     );
@@ -123,7 +123,7 @@ export default function Settings() {
           value={contractorEmail}
           onChange={(e) => setContractorEmail(e.target.value)}
         />
-        <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace", marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginTop: 6 }}>
           When a client approves a change order, a signed copy is sent to this address.
         </div>
       </div>
@@ -187,7 +187,7 @@ export default function Settings() {
           ))
         )}
       </div>
-      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace", marginBottom: 28 }}>
+      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginBottom: 28 }}>
         {codes.length} cost codes
       </div>
 

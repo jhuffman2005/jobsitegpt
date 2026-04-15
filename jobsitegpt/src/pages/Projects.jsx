@@ -48,7 +48,7 @@ export default function Projects() {
     <div className="fade-up">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
         <div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 32, letterSpacing: "0.04em", marginBottom: 6, color: "#1a1f2e" }}>Projects</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, fontSize: 32, letterSpacing: "0.04em", marginBottom: 6, color: "#1a1f2e" }}>Projects</div>
           <div style={{ fontSize: 14, color: "#606880" }}>Create a project to share context across all tools.</div>
         </div>
         <button className="btn btn-primary" onClick={() => { setShowNew(true); setError(""); }}>+ New Project</button>
@@ -92,11 +92,11 @@ export default function Projects() {
       )}
 
       {loading ? (
-        <div style={{ color: "#909ab0", fontFamily: "'DM Mono',monospace", fontSize: 13 }}>Loading projects…</div>
+        <div style={{ color: "#909ab0", fontFamily: "'Inter',sans-serif", fontSize: 13 }}>Loading projects…</div>
       ) : projects.length === 0 ? (
         <div style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "48px 32px", textAlign: "center", color: "#909ab0", borderRadius: 8 }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>📁</div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 8, color: "#1a1f2e" }}>No projects yet</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 8, color: "#1a1f2e" }}>No projects yet</div>
           <div style={{ fontSize: 13, marginBottom: 20 }}>Create your first project to get started.</div>
           <button className="btn btn-primary" onClick={() => setShowNew(true)}>+ New Project</button>
         </div>
@@ -109,12 +109,12 @@ export default function Projects() {
               onMouseLeave={e => e.currentTarget.style.borderColor = "#e0e4ef"}
             >
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 4, color: "#1a1f2e" }}>{p.name}</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "#909ab0" }}>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 18, marginBottom: 4, color: "#1a1f2e" }}>{p.name}</div>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#909ab0" }}>
                   {[p.client_name, p.address, p.contract_type?.replace("_", " ")].filter(Boolean).join(" · ")}
                 </div>
               </div>
-              <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#c0c8d8" }}>
+              <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8" }}>
                 {new Date(p.updated_at).toLocaleDateString()}
               </div>
               <button className="btn btn-ghost" style={{ padding: "6px 10px", fontSize: 12 }} onClick={e => handleDelete(p.id, e)}>✕</button>

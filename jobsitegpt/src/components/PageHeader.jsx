@@ -29,8 +29,8 @@ export default function PageHeader({ pathname, activeProject }) {
           onClick={() => navigate(`/projects/${activeProject.id}`)}
           style={{ marginLeft: 16, display: "flex", alignItems: "center", gap: 8, background: "rgba(240,165,0,0.08)", border: "1px solid rgba(240,165,0,0.2)", padding: "4px 12px", cursor: "pointer", transition: "all 0.15s" }}
         >
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9, color: "#f0a500", letterSpacing: "0.1em", textTransform: "uppercase" }}>Project</span>
-          <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#e2e6f0" }}>{activeProject.name}</span>
+          <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 9, color: "#f0a500", letterSpacing: "0.1em", textTransform: "uppercase" }}>Project</span>
+          <span style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#e2e6f0" }}>{activeProject.name}</span>
         </div>
       )}
 

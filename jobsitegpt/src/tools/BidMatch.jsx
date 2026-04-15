@@ -120,7 +120,7 @@ export default function BidMatch({ activeProject, onProjectChange }) {
           {bids.map((bid, i) => (
             <div key={i} style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "18px 20px", marginBottom: 14, borderRadius: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 13, color: "#c47f00", background: "rgba(240,165,0,0.1)", padding: "3px 10px", border: "1px solid rgba(240,165,0,0.2)", borderRadius: 4, whiteSpace: "nowrap" }}>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, fontSize: 13, color: "#c47f00", background: "rgba(240,165,0,0.1)", padding: "3px 10px", border: "1px solid rgba(240,165,0,0.2)", borderRadius: 4, whiteSpace: "nowrap" }}>
                   BID {i + 1}
                 </div>
                 <input type="text" placeholder={`Contractor ${i + 1} name`} value={bid.name} onChange={(e) => updateName(i, e.target.value)} style={{ flex: 1 }} />
@@ -178,7 +178,7 @@ export default function BidMatch({ activeProject, onProjectChange }) {
           </div>
 
           <div style={{ background: "#ffffff", border: "1.5px solid #f0a500", borderTop: "3px solid #f0a500", padding: "16px 20px", marginBottom: 22, borderRadius: 8 }}>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#909ab0", marginBottom: 8 }}>AI Recommendation</div>
+            <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#909ab0", marginBottom: 8 }}>AI Recommendation</div>
             <div style={{ fontSize: 14, lineHeight: 1.7, color: "#1a1f2e" }}>{result.recommendation}</div>
           </div>
 

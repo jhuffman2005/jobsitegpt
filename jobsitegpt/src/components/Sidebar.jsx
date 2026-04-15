@@ -33,8 +33,8 @@ export default function Sidebar({ user, activeProject }) {
           style={{ padding: "10px 18px", background: "rgba(240,165,0,0.06)", borderBottom: "1px solid rgba(240,165,0,0.15)", cursor: "pointer" }}
           onClick={() => navigate(`/projects/${activeProject.id}`)}
         >
-          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 9, color: "#f0a500", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 3 }}>Active Project</div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#e2e6f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{activeProject.name}</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 9, color: "#f0a500", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 3 }}>Active Project</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#e2e6f0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{activeProject.name}</div>
           {activeProject.client_name && (
             <div style={{ fontSize: 11, color: "#6b7599", marginTop: 2 }}>{activeProject.client_name}</div>
           )}
