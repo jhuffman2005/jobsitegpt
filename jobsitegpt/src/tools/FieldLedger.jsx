@@ -79,6 +79,9 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const [voiceStatus, setVoiceStatus] = useState("");
   const [payLabel, setPayLabel] = useState("");
   const [payAmt, setPayAmt] = useState("");
+  const [payDate, setPayDate] = useState(new Date().toISOString().split("T")[0]);
+  const [payMethod, setPayMethod] = useState("Check");
+  const [payNotes, setPayNotes] = useState("");
   const [ledgerSort, setLedgerSort] = useState({ key: "code", dir: "asc" });
 
   const toggleLedgerSort = (key) => {
@@ -166,10 +169,23 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
 
   const addPayment = () => {
     if (!activeJob || !payAmt) return;
-    const p = { id: Date.now().toString(), jobId: activeJob, label: payLabel || "Payment", amount: parseFloat(payAmt), date: new Date().toISOString().split("T")[0] };
+    const p = {
+      id: Date.now().toString(),
+      jobId: activeJob,
+      label: payLabel || "Payment",
+      amount: parseFloat(payAmt),
+      date: payDate || new Date().toISOString().split("T")[0],
+      method: payMethod,
+      notes: payNotes,
+    };
     persist(jobs, entries, [...payments, p], budgets);
-    setPayLabel(""); setPayAmt(""); showToast("Payment recorded!");
+    setPayLabel(""); setPayAmt(""); setPayNotes("");
+    setPayDate(new Date().toISOString().split("T")[0]);
+    showToast("Payment recorded!");
   };
+
+  const deletePayment = (id) =>
+    persist(jobs, entries, payments.filter((p) => p.id !== id), budgets);
 
   const exportRecon = () => {
     const job = jobs.find((j) => j.id === activeJob);
@@ -216,7 +232,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
       ) : (
         <>
           <div className="fl-tab-bar">
-            {[["log","Log Expense"],["ledger","Ledger"],["recon","Reconciliation"]].map(([id, label]) => (
+            {[["log","Log Expense"],["payment","Log Payment"],["ledger","Ledger"],["recon","Reconciliation"]].map(([id, label]) => (
               <div key={id} className={`fl-tab${tab === id ? " active" : ""}`} onClick={() => setTab(id)}>{label}</div>
             ))}
           </div>
@@ -286,6 +302,73 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
               </div>
             </>
           )}
+
+          {tab === "payment" && (() => {
+            const jobPayments = payments
+              .filter((p) => p.jobId === activeJob)
+              .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+            const totalPaid = jobPayments.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+            return (
+              <>
+                <div className="fl-card" style={{ marginBottom: 16 }}>
+                  <div className="section-label">Record Client Payment</div>
+                  <div className="row-2 input-group">
+                    <div>
+                      <label className="field-label">Date</label>
+                      <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="field-label">Label *</label>
+                      <input type="text" placeholder="Deposit, Draw 1, Final…" value={payLabel} onChange={(e) => setPayLabel(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="row-2 input-group">
+                    <div>
+                      <label className="field-label">Method</label>
+                      <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                        {["Check","ACH / Bank Transfer","Cash","Credit Card","Zelle / Venmo","Wire","Other"].map((t) => <option key={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label">Amount ($) *</label>
+                      <input type="number" min="0" step="0.01" placeholder="0.00" value={payAmt} onChange={(e) => setPayAmt(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="input-group">
+                    <label className="field-label">Notes</label>
+                    <input type="text" placeholder="Check #, reference, memo…" value={payNotes} onChange={(e) => setPayNotes(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addPayment()} />
+                  </div>
+                  <button className="btn btn-primary btn-lg" disabled={!payAmt} onClick={addPayment}>+ Log Payment</button>
+                </div>
+
+                <div className="fl-card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                    <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 15, color: "#1a1f2e" }}>{activeJobObj?.name} — Payments Received</div>
+                    <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 12, color: "#27ae60" }}>{fmt(totalPaid)} received</div>
+                  </div>
+                  {jobPayments.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "32px 0", color: "#909ab0", fontSize: 13 }}>No payments recorded yet.</div>
+                  ) : (
+                    jobPayments.map((p) => (
+                      <div key={p.id} className="fl-pay-row">
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, color: "#1a1f2e", fontWeight: 600 }}>{p.label}</div>
+                          <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginTop: 2 }}>
+                            {p.date || "—"}{p.method ? ` · ${p.method}` : ""}{p.notes ? ` · ${p.notes}` : ""}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+                          <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 14, color: "#27ae60", fontWeight: 600 }}>{fmt(p.amount)}</span>
+                          <span style={{ cursor: "pointer", color: "#c0c8d8", fontSize: 13 }} onClick={() => deletePayment(p.id)}>✕</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            );
+          })()}
 
           {tab === "ledger" && (
             <div className="fl-card">
