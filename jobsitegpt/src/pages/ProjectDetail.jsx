@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   getProject, updateProject,
   getProjectFiles, uploadProjectFile,
-  deleteProjectFile, getProjectFileUrl
+  deleteProjectFile, getProjectFileUrl,
+  getGenerations,
 } from "../lib/projects";
 
 export default function ProjectDetail({ onProjectLoad }) {
@@ -12,6 +13,8 @@ export default function ProjectDetail({ onProjectLoad }) {
   const fileInputRef = useRef(null);
   const [project, setProject] = useState(null);
   const [files, setFiles] = useState([]);
+  const [generations, setGenerations] = useState([]);
+  const [expandedGen, setExpandedGen] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -28,9 +31,10 @@ export default function ProjectDetail({ onProjectLoad }) {
   const load = async () => {
     try {
       setLoading(true);
-      const [p, f] = await Promise.all([getProject(id), getProjectFiles(id)]);
+      const [p, f, g] = await Promise.all([getProject(id), getProjectFiles(id), getGenerations(id)]);
       setProject(p);
       setFiles(f);
+      setGenerations(g);
       setForm({
         name: p.name || "",
         client_name: p.client_name || "",
@@ -204,6 +208,66 @@ export default function ProjectDetail({ onProjectLoad }) {
           ))
         )}
       </div>
+
+      {/* Generation History */}
+      {generations.length > 0 && (
+        <>
+          <div className="section-label" style={{ marginTop: 32 }}>Generation History</div>
+          {(() => {
+            const TOOL_ORDER = ["ScopeGPT", "ScheduleGPT", "ChangeOrderGPT", "BidMatch", "FieldLedger"];
+            const TOOL_ICONS = { ScopeGPT: "📋", ScheduleGPT: "📅", ChangeOrderGPT: "✏", BidMatch: "⚖", FieldLedger: "📒" };
+            const grouped = {};
+            generations.forEach((g) => {
+              if (!grouped[g.tool]) grouped[g.tool] = [];
+              grouped[g.tool].push(g);
+            });
+            return TOOL_ORDER.filter((t) => grouped[t]).map((tool) => (
+              <div key={tool} style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 14 }}>{TOOL_ICONS[tool]}</span>
+                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{tool}</span>
+                  <span style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>({grouped[tool].length})</span>
+                </div>
+                {grouped[tool].map((g) => (
+                  <div key={g.id} style={{ background: "#ffffff", border: "1px solid #e0e4ef", borderRadius: 6, marginBottom: 8 }}>
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
+                      onClick={() => setExpandedGen(expandedGen === g.id ? null : g.id)}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1f2e" }}>{g.title}</div>
+                        <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace", marginTop: 2 }}>
+                          {new Date(g.created_at).toLocaleDateString()} · {new Date(g.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 11, color: "#c0c8d8" }}>{expandedGen === g.id ? "▲" : "▼"}</span>
+                    </div>
+                    {expandedGen === g.id && (
+                      <div style={{ padding: "0 16px 14px", borderTop: "1px solid #f0f2f5" }}>
+                        <div style={{ fontSize: 12, color: "#606880", lineHeight: 1.6, marginTop: 10 }}>{g.summary}</div>
+                        {g.result_data && (
+                          <button
+                            className="btn"
+                            style={{ marginTop: 10, padding: "5px 12px", fontSize: 11 }}
+                            onClick={() => {
+                              const a = document.createElement("a");
+                              a.href = URL.createObjectURL(new Blob([JSON.stringify(g.result_data, null, 2)], { type: "application/json" }));
+                              a.download = `${tool}_${g.title?.replace(/\s+/g, "_") || "export"}.json`;
+                              a.click();
+                            }}
+                          >
+                            ⬇ Export JSON
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ));
+          })()}
+        </>
+      )}
 
       {/* Use in Tools */}
       <div className="section-label" style={{ marginTop: 8 }}>Use This Project In</div>

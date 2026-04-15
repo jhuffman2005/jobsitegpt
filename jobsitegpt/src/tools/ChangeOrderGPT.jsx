@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast, useVoiceInput } from "../lib/hooks";
-import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import { storeApproval, saveGeneration, getUserSettings } from "../lib/projects";
+import { ProcessingSteps, UploadZone, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
@@ -21,6 +22,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
   const [clientEmail, setClientEmail] = useState("");
   const [coNumber, setCoNumber] = useState("001");
   const [description, setDescription] = useState("");
+  const [specialInstructions, setSpecialInstructions] = useState("");
   const [status, setStatus] = useState("idle");
   const [stepIdx, setStepIdx] = useState(0);
   const [result, setResult] = useState(null);
@@ -29,11 +31,19 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
   const [sending, setSending] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [editingLine, setEditingLine] = useState(null);
+  const [contractorEmail, setContractorEmail] = useState("");
 
   const projName = activeProject?.name || projectName;
   const cliName = activeProject?.client_name || clientName;
   const cliEmail = activeProject?.client_email || clientEmail;
   const markup = activeProject?.markup_percent || 0;
+
+  // Load contractor email from settings
+  useEffect(() => {
+    getUserSettings().then((s) => {
+      if (s.contractor_email) setContractorEmail(s.contractor_email);
+    }).catch(() => {});
+  }, []);
 
   const { isRecording, toggle: toggleVoice } = useVoiceInput((transcript) => {
     setDescription((prev) => (prev ? prev + " " + transcript : transcript));
@@ -54,7 +64,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
       });
       content.push({
         type: "text",
-        text: `Project: "${projName}" | Client: "${cliName}" | CO #${coNumber}\nMarkup/Profit: ${markup}%\nChange Description: ${description}\n\nGenerate a complete change order. Use ${markup}% for overhead+profit combined. Return ONLY valid JSON:\n{"changeOrderNumber":"string","projectName":"string","clientName":"string","date":"string","title":"string","description":"string","reason":"string","lineItems":[{"trade":"string","description":"string","quantity":1,"unit":"string","unitPrice":0,"totalPrice":0}],"subtotal":0,"overhead":0,"profit":0,"totalAmount":0,"daysAdded":0,"contractLanguage":"string","notes":"string"}`,
+        text: `Project: "${projName}" | Client: "${cliName}" | CO #${coNumber}\nMarkup/Profit: ${markup}%\nChange Description: ${description}\n${specialInstructions ? `Special Instructions: ${specialInstructions}\n` : ""}\nGenerate a complete change order. Use ${markup}% for overhead+profit combined. Return ONLY valid JSON:\n{"changeOrderNumber":"string","projectName":"string","clientName":"string","date":"string","title":"string","description":"string","reason":"string","lineItems":[{"trade":"string","description":"string","quantity":1,"unit":"string","unitPrice":0,"totalPrice":0}],"subtotal":0,"overhead":0,"profit":0,"totalAmount":0,"daysAdded":0,"contractLanguage":"string","notes":"string"}`,
       });
       timers.forEach(clearTimeout);
       const r = await callClaude(
@@ -62,6 +72,8 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
         "You are an expert construction project manager writing professional change orders. Be specific with line items and pricing. Use current market rates. Return valid JSON only, no markdown."
       );
       setResult(r); setStatus("done"); setEmailSent(false);
+
+      // localStorage history
       const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
       history.unshift({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -72,6 +84,15 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
         summary: `CO #${r.changeOrderNumber} · $${Number(r.totalAmount).toLocaleString()} · +${r.daysAdded} days`,
       });
       localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
+
+      // Supabase history
+      if (activeProject?.id) {
+        saveGeneration(
+          activeProject.id, "ChangeOrderGPT", r.title,
+          `CO #${r.changeOrderNumber} · ${fmt(r.totalAmount)} · +${r.daysAdded} days`,
+          r
+        );
+      }
     } catch (e) {
       timers.forEach(clearTimeout);
       setError(e.message);
@@ -81,10 +102,10 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
 
   const reset = () => {
     resetFiles(); setProjectName(""); setClientName(""); setClientEmail("");
-    setDescription(""); setStatus("idle"); setResult(null); setError(""); setEmailSent(false);
+    setDescription(""); setSpecialInstructions("");
+    setStatus("idle"); setResult(null); setError(""); setEmailSent(false);
   };
 
-  // Recalculate totals when line items change
   const recalcTotals = (lineItems) => {
     const subtotal = lineItems.reduce((sum, li) => sum + (parseFloat(li.totalPrice) || 0), 0);
     const overheadRate = markup > 0 ? markup / 2 / 100 : (result.overhead / result.subtotal) || 0.1;
@@ -101,52 +122,33 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
       if (field === "quantity" || field === "unitPrice") {
         newLi.totalPrice = (parseFloat(newLi.quantity) || 0) * (parseFloat(newLi.unitPrice) || 0);
       }
-      if (field === "totalPrice") {
-        newLi.totalPrice = parseFloat(value) || 0;
-      }
+      if (field === "totalPrice") newLi.totalPrice = parseFloat(value) || 0;
       return newLi;
     });
-    const totals = recalcTotals(updated);
-    setResult({ ...result, lineItems: updated, ...totals });
+    setResult({ ...result, lineItems: updated, ...recalcTotals(updated) });
   };
 
   const addLineItem = () => {
     const updated = [...result.lineItems, { trade: "", description: "New line item", quantity: 1, unit: "LS", unitPrice: 0, totalPrice: 0 }];
-    const totals = recalcTotals(updated);
-    setResult({ ...result, lineItems: updated, ...totals });
+    setResult({ ...result, lineItems: updated, ...recalcTotals(updated) });
   };
 
   const removeLineItem = (idx) => {
     const updated = result.lineItems.filter((_, i) => i !== idx);
-    const totals = recalcTotals(updated);
-    setResult({ ...result, lineItems: updated, ...totals });
+    setResult({ ...result, lineItems: updated, ...recalcTotals(updated) });
   };
 
   const toText = (r) => [
-    `CHANGE ORDER #${r.changeOrderNumber}`,
-    `================`,
-    `Project: ${r.projectName}`,
-    `Client: ${r.clientName}`,
-    `Date: ${r.date}`,
-    `Title: ${r.title}`,
-    ``,
-    `DESCRIPTION`,
-    r.description,
-    ``,
-    `REASON FOR CHANGE`,
-    r.reason,
-    ``,
+    `CHANGE ORDER #${r.changeOrderNumber}`, `================`,
+    `Project: ${r.projectName}`, `Client: ${r.clientName}`,
+    `Date: ${r.date}`, `Title: ${r.title}`, ``,
+    `DESCRIPTION`, r.description, ``,
+    `REASON FOR CHANGE`, r.reason, ``,
     `COST BREAKDOWN`,
     r.lineItems.map((li) => `  ${li.trade} — ${li.description}: ${li.quantity} ${li.unit} @ ${fmt(li.unitPrice)} = ${fmt(li.totalPrice)}`).join("\n"),
-    ``,
-    `Subtotal: ${fmt(r.subtotal)}`,
-    `Overhead: ${fmt(r.overhead)}`,
-    `Profit: ${fmt(r.profit)}`,
-    `TOTAL: ${fmt(r.totalAmount)}`,
-    `Schedule Impact: +${r.daysAdded} days`,
-    ``,
-    `CONTRACT LANGUAGE`,
-    r.contractLanguage,
+    ``, `Subtotal: ${fmt(r.subtotal)}`, `Overhead: ${fmt(r.overhead)}`,
+    `Profit: ${fmt(r.profit)}`, `TOTAL: ${fmt(r.totalAmount)}`,
+    `Schedule Impact: +${r.daysAdded} days`, ``, `CONTRACT LANGUAGE`, r.contractLanguage,
   ].join("\n");
 
   const toEmailHtml = (r, approvalToken) => `
@@ -168,7 +170,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
           </thead>
           <tbody>
             ${r.lineItems.map((li, i) => `
-              <tr style="background: ${i % 2 === 0 ? '#ffffff' : '#f8f9fc'};">
+              <tr style="background: ${i % 2 === 0 ? "#ffffff" : "#f8f9fc"};">
                 <td style="padding: 10px 12px; font-size: 13px; color: #1a1f2e; border-bottom: 1px solid #e0e4ef;">
                   ${li.description}
                   <div style="font-size: 11px; color: #909ab0; margin-top: 2px;">${li.trade} · ${li.quantity} ${li.unit} @ ${fmt(li.unitPrice)}</div>
@@ -207,6 +209,22 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
     setSending(true);
     try {
       const approvalToken = withApproval ? `${result.changeOrderNumber}-${Date.now()}` : null;
+
+      // If sending for approval, store in Supabase so the approve page can retrieve it
+      if (withApproval && approvalToken) {
+        try {
+          await storeApproval(
+            approvalToken,
+            activeProject?.id || null,
+            result,
+            contractorEmail || null
+          );
+        } catch (e) {
+          console.warn("Could not store approval in Supabase:", e.message);
+          // Continue anyway — approval link still works if table isn't migrated yet
+        }
+      }
+
       const res = await fetch("/api/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -284,6 +302,8 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
             <UploadZone files={files} onAdd={add} onRemove={remove} hint="Photos of change conditions, spec sheets, written requests" />
           </div>
 
+          <SpecialInstructions value={specialInstructions} onChange={setSpecialInstructions} />
+
           {error && <div className="error-box">⚠ {error}</div>}
           <button className="btn btn-primary btn-lg" disabled={!description.trim()} onClick={generate}>
             📋 Generate Change Order
@@ -338,7 +358,6 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
             {result.lineItems.map((li, i) => (
               <div key={i} style={{ padding: "10px 0", borderBottom: "1px solid #f0f2f5" }}>
                 {editingLine === i ? (
-                  // Edit mode
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div className="row-2">
                       <div><label className="field-label">Trade</label><input type="text" value={li.trade} onChange={e => updateLineItem(i, "trade", e.target.value)} style={{ fontSize: 13 }} /></div>
@@ -355,7 +374,6 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
                     </div>
                   </div>
                 ) : (
-                  // View mode
                   <div className="co-line" style={{ padding: 0, borderBottom: "none" }}>
                     <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setEditingLine(i)}>
                       <div className="co-line-desc">{li.description}</div>
@@ -399,7 +417,9 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
           <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.2)", padding: "16px 20px", borderRadius: 8, marginTop: 8 }}>
             <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e", marginBottom: 6 }}>Client Approval</div>
             <div style={{ fontSize: 12, color: "#606880", marginBottom: 14 }}>
-              Send for approval to get a digital sign-off from your client. They'll receive an email with an approval button. You'll get a copy once they approve.
+              Send for approval to get a digital sign-off from your client. They'll receive an email with an approve button.
+              {contractorEmail && <span> A signed copy will be sent to <strong>{contractorEmail}</strong>.</span>}
+              {!contractorEmail && <span> Add your contractor email in <a href="/settings" style={{ color: "#f0a500" }}>Settings</a> to receive signed copies.</span>}
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button className="btn btn-primary" disabled={sending || !cliEmail} onClick={() => sendEmail(true)}>

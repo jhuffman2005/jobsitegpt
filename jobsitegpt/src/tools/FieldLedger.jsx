@@ -1,6 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useToast, useVoiceInput } from "../lib/hooks";
+import { getUserCostCodes } from "../lib/projects";
+import { SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const DEFAULT_COST_CODES = [
@@ -28,6 +30,15 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const [budgets, setBudgets] = useState(() => load("fl_budgets", {}));
   const [activeJob, setActiveJob] = useState("");
   const [tab, setTab] = useState("log");
+  const [savedCostCodes, setSavedCostCodes] = useState([]);
+  const [specialInstructions, setSpecialInstructions] = useState("");
+
+  // Load user's saved cost codes from Supabase
+  useEffect(() => {
+    getUserCostCodes().then((codes) => {
+      if (codes.length > 0) setSavedCostCodes(codes);
+    }).catch(() => {});
+  }, []);
   const [budgetMode, setBudgetMode] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [toast, showToast] = useToast();
@@ -72,8 +83,9 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
 
   const allCodes = useCallback(() => {
     const used = [...new Set(entries.map((e) => e.code))];
-    return [...new Set([...used, ...DEFAULT_COST_CODES])].sort();
-  }, [entries]);
+    const base = savedCostCodes.length > 0 ? savedCostCodes : DEFAULT_COST_CODES;
+    return [...new Set([...used, ...base])].sort();
+  }, [entries, savedCostCodes]);
 
   const onCodeInput = (val) => {
     setLogCode(val);
@@ -103,9 +115,10 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const parseVoice = async () => {
     if (!voiceText.trim()) return;
     setVoiceStatus("Parsing…");
+    const codeSources = allCodes();
     try {
       const r = await callClaude(
-        [{ role: "user", content: `Parse this expense into JSON only, no markdown:\n"${voiceText}"\nReturn: {"payee":"string","amount":0,"code":"string","pay":"Cash","desc":"string"}\ncode: pick the closest from ${DEFAULT_COST_CODES.join(", ")}\npay: one of ${PAYMENT_TYPES.join(", ")}` }],
+        [{ role: "user", content: `Parse this expense into JSON only, no markdown:\n"${voiceText}"\n${specialInstructions ? `Context: ${specialInstructions}\n` : ""}Return: {"payee":"string","amount":0,"code":"string","pay":"Cash","desc":"string"}\ncode: pick the closest from ${codeSources.join(", ")}\npay: one of ${PAYMENT_TYPES.join(", ")}` }],
         "You parse expense descriptions into structured JSON. Return valid JSON only, no markdown.",
         400
       );
@@ -248,7 +261,8 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                   <label className="field-label">Description</label>
                   <input type="text" placeholder="What was this for?" value={logDesc} onChange={(e) => setLogDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && logExpense()} />
                 </div>
-                <button className="btn btn-primary btn-lg" disabled={!logCode.trim() || !logAmt} onClick={logExpense}>+ Log Expense</button>
+                <SpecialInstructions value={specialInstructions} onChange={setSpecialInstructions} />
+              <button className="btn btn-primary btn-lg" disabled={!logCode.trim() || !logAmt} onClick={logExpense}>+ Log Expense</button>
               </div>
             </>
           )}

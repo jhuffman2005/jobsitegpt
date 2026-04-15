@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { ProcessingSteps, UploadZone } from "../components/SharedComponents";
+import { getProjectFileAsBase64, saveGeneration } from "../lib/projects";
+import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
 const STEPS = [
@@ -20,17 +21,64 @@ const PHASE_COLORS = [
   { bg: "rgba(16,185,129,0.1)",  color: "#10b981" },
 ];
 
+// Load scope handoff from ScopeGPT if present
+function loadScopeHandoff() {
+  try {
+    const raw = sessionStorage.getItem("jsg_scope_handoff");
+    if (!raw) return null;
+    sessionStorage.removeItem("jsg_scope_handoff"); // consume once
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
 export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [projectType, setProjectType] = useState("remodel");
+  const [specialInstructions, setSpecialInstructions] = useState("");
   const [status, setStatus] = useState("idle");
   const [stepIdx, setStepIdx] = useState(0);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
+  const [scopeHandoff, setScopeHandoff] = useState(null); // scope data passed from ScopeGPT
 
-  const projName = activeProject?.name || projectName;
+  // Project file picker state
+  const [selectedPF, setSelectedPF] = useState([]);
+  const [loadingPF, setLoadingPF] = useState(new Set());
+
+  // Check for scope handoff on mount
+  useEffect(() => {
+    const handoff = loadScopeHandoff();
+    if (handoff) {
+      setScopeHandoff(handoff);
+      showToast("Scope data loaded from ScopeGPT");
+    }
+  }, []);
+
+  // Clear project file selection when project changes
+  useEffect(() => {
+    setSelectedPF([]);
+  }, [activeProject?.id]);
+
+  const projName = activeProject?.name || projectName || scopeHandoff?.projectName || "";
+
+  const toggleProjectFile = async (file) => {
+    const exists = selectedPF.find((f) => f.id === file.id);
+    if (exists) {
+      setSelectedPF((p) => p.filter((f) => f.id !== file.id));
+      return;
+    }
+    setLoadingPF((prev) => new Set([...prev, file.id]));
+    try {
+      const base64 = await getProjectFileAsBase64(file.storage_path);
+      setSelectedPF((p) => [...p, { ...file, b64: base64 }]);
+    } catch (e) {
+      showToast("Could not load file: " + e.message);
+    } finally {
+      setLoadingPF((prev) => { const s = new Set(prev); s.delete(file.id); return s; });
+    }
+  };
 
   const generate = async () => {
     setStatus("loading"); setStepIdx(0); setError("");
@@ -38,13 +86,27 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     try {
       const content = [];
 
+      // Scope handoff from ScopeGPT (highest priority context)
+      if (scopeHandoff) {
+        content.push({ type: "text", text: `ScopeGPT Output (use this as the authoritative scope):\n${JSON.stringify(scopeHandoff)}` });
+      }
+
+      // Project files selected from repository
+      selectedPF.forEach((pf) => {
+        if (!pf.b64) return;
+        if (pf.file_type?.startsWith("image/"))
+          content.push({ type: "image", source: { type: "base64", media_type: pf.file_type, data: pf.b64 } });
+        else
+          content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: pf.b64 } });
+      });
+
+      // Locally uploaded files
       files.forEach((f) => {
         const data = b64[f.name];
         if (!data) return;
         if (f.type.startsWith("image/")) {
           content.push({ type: "image", source: { type: "base64", media_type: f.type, data } });
         } else if (f.type === "application/json" || f.name.endsWith(".json")) {
-          // JSON files (ScopeGPT exports) — decode and send as text
           const decoded = atob(data);
           content.push({ type: "text", text: `ScopeGPT Export:\n${decoded}` });
         } else {
@@ -52,21 +114,25 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
         }
       });
 
-
       const projectContext = activeProject
         ? `Project: "${activeProject.name}" | Client: "${activeProject.client_name || "N/A"}" | Address: "${activeProject.address || "N/A"}" | Type: ${projectType === "remodel" ? "Remodel/Renovation" : "New Construction"}`
         : `Project: "${projName}" | Type: ${projectType === "remodel" ? "Remodel/Renovation" : "New Construction"}`;
 
       content.push({
         type: "text",
-        text: `${projectContext}\n\nAnalyze and return ONLY valid JSON:\n{"projectName":"string","totalDays":0,"phases":["Phase1"],"tasks":[{"id":1,"task":"string","phase":"string","startDay":1,"durationDays":5,"dependencies":[],"trade":"string","notes":"string"}],"subcontractors":[{"trade":"string","phase":"string","estimatedDays":0,"recommendedSubTypes":["string"],"scope":"string"}]}\n\nA full renovation: 15-30 tasks across multiple phases. Keep task names under 50 chars, notes under 60 chars, recommendedSubTypes 2-3 items max.`,
+        text: `${projectContext}\n${specialInstructions ? `Special Instructions: ${specialInstructions}\n` : ""}\nAnalyze and return ONLY valid JSON:\n{"projectName":"string","totalDays":0,"phases":["Phase1"],"tasks":[{"id":1,"task":"string","phase":"string","startDay":1,"durationDays":5,"dependencies":[],"trade":"string","notes":"string"}],"subcontractors":[{"trade":"string","phase":"string","estimatedDays":0,"recommendedSubTypes":["string"],"scope":"string"}]}\n\nA full renovation: 15-30 tasks across multiple phases. Keep task names under 50 chars, notes under 60 chars, recommendedSubTypes 2-3 items max.`,
       });
+
       timers.forEach(clearTimeout);
       const r = await callClaude(
         [{ role: "user", content }],
         `You are an expert construction scheduler. ${projectType === "remodel" ? "Focus on interior trades; only include exterior if documents explicitly call for them." : "Include full sequence: site work, excavation, foundation, framing, exterior, MEP, finishes."} Return valid JSON only, no markdown.`
       );
-      setResult(r); setStatus("done");
+
+      setResult(r);
+      setStatus("done");
+
+      // localStorage history
       const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
       history.unshift({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -77,6 +143,15 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
         summary: `${r.tasks.length} tasks across ${r.phases.length} phases · ${r.totalDays} days`,
       });
       localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
+
+      // Supabase history
+      if (activeProject?.id) {
+        saveGeneration(
+          activeProject.id, "ScheduleGPT", r.projectName,
+          `${r.tasks.length} tasks · ${r.phases.length} phases · ${r.totalDays} days`,
+          r
+        );
+      }
     } catch (e) {
       timers.forEach(clearTimeout);
       setError(e.message);
@@ -84,7 +159,12 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     }
   };
 
-  const reset = () => { resetFiles(); setProjectName(""); setStatus("idle"); setResult(null); setError(""); };
+  const reset = () => {
+    resetFiles();
+    setProjectName(""); setSpecialInstructions("");
+    setSelectedPF([]); setScopeHandoff(null);
+    setStatus("idle"); setResult(null); setError("");
+  };
 
   const phaseMap = {};
   if (result) result.phases.forEach((p, i) => { phaseMap[p] = PHASE_COLORS[i % PHASE_COLORS.length]; });
@@ -108,6 +188,18 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
       {(status === "idle" || status === "error") && (
         <>
+          {/* Scope handoff banner */}
+          {scopeHandoff && (
+            <div style={{ background: "rgba(74,144,226,0.06)", border: "1px solid rgba(74,144,226,0.2)", padding: "12px 16px", marginBottom: 20, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 18 }}>📋</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#4a90e2" }}>Scope loaded from ScopeGPT</div>
+                <div style={{ fontSize: 12, color: "#606880" }}>{scopeHandoff.projectName} · {scopeHandoff.trades?.length} trades · {scopeHandoff.estimatedDuration}</div>
+              </div>
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setScopeHandoff(null)}>✕ Clear</button>
+            </div>
+          )}
+
           <div className="section-label">Project Info</div>
           <div className="row-2 input-group">
             <div>
@@ -115,9 +207,9 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
               <input
                 type="text"
                 placeholder="e.g. Riverside Townhomes Phase 2"
-                value={activeProject?.name || projectName}
+                value={activeProject?.name || projectName || scopeHandoff?.projectName || ""}
                 onChange={(e) => setProjectName(e.target.value)}
-                disabled={!!activeProject?.name}
+                disabled={!!(activeProject?.name || scopeHandoff?.projectName)}
               />
             </div>
             <div>
@@ -130,14 +222,24 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
           </div>
 
           <div className="section-label">Upload Construction Documents</div>
+          {activeProject?.id && (
+            <ProjectFilePicker
+              projectId={activeProject.id}
+              selectedIds={selectedPF.map((f) => f.id)}
+              loadingIds={loadingPF}
+              onToggle={toggleProjectFile}
+            />
+          )}
           <div className="input-group">
             <UploadZone files={files} onAdd={add} onRemove={remove} hint="Scope of work, bid, plans, or ScopeGPT JSON export · PDF · Images" />
           </div>
 
+          <SpecialInstructions value={specialInstructions} onChange={setSpecialInstructions} />
+
           {error && <div className="error-box">⚠ {error}</div>}
           <button
             className="btn btn-primary btn-lg"
-            disabled={files.length === 0 && !projName.trim()}
+            disabled={!scopeHandoff && files.length === 0 && selectedPF.length === 0 && !projName.trim()}
             onClick={generate}
           >
             📅 Generate Gantt Chart

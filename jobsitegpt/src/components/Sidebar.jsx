@@ -60,6 +60,14 @@ export default function Sidebar({ user, activeProject }) {
 
       <div className="nav-footer">
         <div className="nav-user">{user?.email || "Beta User"}</div>
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+          style={{ fontSize: 12, padding: "6px 0" }}
+        >
+          <span className="nav-item-icon">⚙</span>
+          Settings
+        </NavLink>
         <button
           className="btn btn-ghost"
           style={{ padding: "6px 0", fontSize: 11, width: "100%", justifyContent: "flex-start" }}

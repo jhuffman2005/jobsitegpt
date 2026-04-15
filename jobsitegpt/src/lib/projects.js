@@ -97,3 +97,112 @@ export async function getProjectFileAsBase64(storagePath) {
     reader.readAsDataURL(data);
   });
 }
+
+// ── Generation History ────────────────────────────────────────────────────
+
+export async function saveGeneration(projectId, tool, title, summary, resultData) {
+  if (!projectId) return null;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from("project_generations")
+      .insert({ project_id: projectId, user_id: user.id, tool, title, summary, result_data: resultData })
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.warn("saveGeneration failed:", e.message);
+    return null;
+  }
+}
+
+export async function getGenerations(projectId) {
+  try {
+    const { data, error } = await supabase
+      .from("project_generations")
+      .select("id, tool, title, summary, created_at, result_data")
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (e) {
+    console.warn("getGenerations failed:", e.message);
+    return [];
+  }
+}
+
+// ── Change Order Approvals ────────────────────────────────────────────────
+
+export async function storeApproval(token, projectId, coData, contractorEmail) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from("change_order_approvals")
+    .insert({
+      token,
+      user_id: user.id,
+      project_id: projectId || null,
+      co_data: coData,
+      contractor_email: contractorEmail || null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getApproval(token) {
+  const { data, error } = await supabase
+    .from("change_order_approvals")
+    .select("*")
+    .eq("token", token)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateApprovalStatus(token, status) {
+  const { error } = await supabase
+    .from("change_order_approvals")
+    .update({ status, approved_at: new Date().toISOString() })
+    .eq("token", token);
+  if (error) throw error;
+}
+
+// ── User Cost Codes ───────────────────────────────────────────────────────
+
+export async function getUserCostCodes() {
+  try {
+    const { data, error } = await supabase
+      .from("user_cost_codes")
+      .select("codes")
+      .single();
+    if (error) return []; // no row yet = empty
+    return data?.codes || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveUserCostCodes(codes) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase
+    .from("user_cost_codes")
+    .upsert(
+      { user_id: user.id, codes, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+  if (error) throw error;
+}
+
+// ── User Settings ─────────────────────────────────────────────────────────
+
+export async function saveUserSettings(settings) {
+  const { error } = await supabase.auth.updateUser({ data: settings });
+  if (error) throw error;
+}
+
+export async function getUserSettings() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.user_metadata || {};
+}
