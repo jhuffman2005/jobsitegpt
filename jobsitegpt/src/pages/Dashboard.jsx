@@ -47,7 +47,7 @@ export default function Dashboard({ user }) {
   return (
     <div className="fade-up">
       <div style={{ marginBottom: 32 }}>
-        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 800, fontSize: 32, letterSpacing: "0.04em", marginBottom: 6, color: "#1a1f2e" }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontWeight: 800, fontSize: 32, letterSpacing: "0.04em", marginBottom: 6, color: "#1a1f2e" }}>
           Welcome back{firstName ? `, ${firstName}` : ""}.
         </div>
         <div style={{ fontSize: 14, color: "#606880" }}>
@@ -64,15 +64,15 @@ export default function Dashboard({ user }) {
       >
         <div style={{ fontSize: 24 }}>📁</div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, color: "#1a1f2e", marginBottom: 2 }}>Start with a Project</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 16, color: "#1a1f2e", marginBottom: 2 }}>Start with a Project</div>
           <div style={{ fontSize: 13, color: "#606880" }}>Set up your project details once — client info, address, contract type — and every tool reads from it automatically.</div>
         </div>
-        <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 14, color: "#c0c8d8" }}>→</div>
+        <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 14, color: "#c0c8d8" }}>→</div>
       </div>
 
       {/* Workflow banner */}
       <div className="workflow-banner">
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#909ab0", letterSpacing: "0.12em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 10, color: "#909ab0", letterSpacing: "0.12em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
           Project Workflow
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -91,7 +91,7 @@ export default function Dashboard({ user }) {
             <div className="tool-card-num">{t.badge} / 05</div>
             <div className="tool-card-name">{t.name}</div>
             <div className="tool-card-desc">{t.desc}</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#c0c8d8" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#c0c8d8" }}>
               {t.flow.map((f, i) =>
                 f === "→"
                   ? <span key={i} style={{ color: "#f0a500" }}>{f}</span>

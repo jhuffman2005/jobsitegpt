@@ -100,18 +100,18 @@ export default function ProjectDetail({ onProjectLoad }) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  if (loading) return <div style={{ color: "#6b7599", fontFamily: "'IBM Plex Mono',monospace", fontSize: 13 }}>Loading project…</div>;
+  if (loading) return <div style={{ color: "#6b7599", fontFamily: "'Inter',sans-serif", fontSize: 13 }}>Loading project…</div>;
 
   return (
     <div className="fade-up">
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
         <div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 28, letterSpacing: "0.04em", marginBottom: 4 }}>{project?.name}</div>
-          <div style={{ fontSize: 12, color: "#6b7599", fontFamily: "'IBM Plex Mono',monospace", cursor: "pointer" }} onClick={() => navigate("/projects")}>← All Projects</div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 800, fontSize: 28, letterSpacing: "0.04em", marginBottom: 4 }}>{project?.name}</div>
+          <div style={{ fontSize: 12, color: "#6b7599", fontFamily: "'Inter',sans-serif", cursor: "pointer" }} onClick={() => navigate("/projects")}>← All Projects</div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          {saved && <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: "#27ae60" }}>✓ Saved</span>}
+          {saved && <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#27ae60" }}>✓ Saved</span>}
           <button className="btn btn-primary" disabled={saving} onClick={handleSave}>
             {saving ? "Saving…" : "Save Changes"}
           </button>
@@ -182,10 +182,10 @@ export default function ProjectDetail({ onProjectLoad }) {
             onChange={e => handleUpload(e.target.files)}
           />
           <div style={{ fontSize: 24, marginBottom: 8 }}>📎</div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 600, fontSize: 14, color: "#6b7599" }}>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 600, fontSize: 14, color: "#6b7599" }}>
             {uploading ? "Uploading…" : "Drop files or click to upload"}
           </div>
-          <div style={{ fontSize: 11, color: "#3a4260", fontFamily: "'IBM Plex Mono',monospace", marginTop: 5 }}>
+          <div style={{ fontSize: 11, color: "#3a4260", fontFamily: "'Inter',sans-serif", marginTop: 5 }}>
             PDF · JPG · PNG — plans, permits, specs, photos
           </div>
         </div>
@@ -198,7 +198,7 @@ export default function ProjectDetail({ onProjectLoad }) {
               <div style={{ fontSize: 16 }}>{f.file_type?.startsWith("image/") ? "🖼" : "📄"}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{f.file_name}</div>
-                <div style={{ fontSize: 11, color: "#6b7599", fontFamily: "'IBM Plex Mono',monospace" }}>
+                <div style={{ fontSize: 11, color: "#6b7599", fontFamily: "'Inter',sans-serif" }}>
                   {fmtSize(f.file_size)} · {new Date(f.created_at).toLocaleDateString()}
                 </div>
               </div>
@@ -225,8 +225,8 @@ export default function ProjectDetail({ onProjectLoad }) {
               <div key={tool} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <span style={{ fontSize: 14 }}>{TOOL_ICONS[tool]}</span>
-                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{tool}</span>
-                  <span style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>({grouped[tool].length})</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>{tool}</span>
+                  <span style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif" }}>({grouped[tool].length})</span>
                 </div>
                 {grouped[tool].map((g) => (
                   <div key={g.id} style={{ background: "#ffffff", border: "1px solid #e0e4ef", borderRadius: 6, marginBottom: 8 }}>
@@ -236,7 +236,7 @@ export default function ProjectDetail({ onProjectLoad }) {
                     >
                       <div style={{ flex: 1 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1f2e" }}>{g.title}</div>
-                        <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace", marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginTop: 2 }}>
                           {new Date(g.created_at).toLocaleDateString()} · {new Date(g.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       </div>
@@ -286,7 +286,7 @@ export default function ProjectDetail({ onProjectLoad }) {
             onMouseLeave={e => e.currentTarget.style.borderColor = "#e0e4ef"}
           >
             <span style={{ fontSize: 16 }}>{t.icon}</span>
-            <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e" }}>{t.label}</span>
+            <span style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e" }}>{t.label}</span>
           </div>
         ))}
       </div>

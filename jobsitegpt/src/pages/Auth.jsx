@@ -83,7 +83,7 @@ export default function Auth() {
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div><span className="logo-badge">JOBSITEGPT</span></div>
           <div className="logo-title" style={{ marginTop: 8, fontSize: 24 }}>Construction AI Suite</div>
-          <div style={{ marginTop: 12, display: "inline-block", background: "rgba(240,165,0,0.12)", border: "1px solid rgba(240,165,0,0.2)", color: "#f0a500", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, padding: "3px 12px", letterSpacing: "0.1em" }}>
+          <div style={{ marginTop: 12, display: "inline-block", background: "rgba(240,165,0,0.12)", border: "1px solid rgba(240,165,0,0.2)", color: "#f0a500", fontFamily: "'Inter',sans-serif", fontSize: 10, padding: "3px 12px", letterSpacing: "0.1em" }}>
             BETA ACCESS
           </div>
         </div>
@@ -102,7 +102,7 @@ export default function Auth() {
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
               <div style={{ flex: 1, height: 1, background: "#252d42" }} />
-              <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: "#3a4260" }}>OR</span>
+              <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#3a4260" }}>OR</span>
               <div style={{ flex: 1, height: 1, background: "#252d42" }} />
             </div>
             <button className="btn" style={{ width: "100%", justifyContent: "center" }} onClick={() => { setMode("password"); setError(""); }}>

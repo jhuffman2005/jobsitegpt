@@ -44,10 +44,10 @@ export function UploadZone({ files, onAdd, onRemove, hint = "PDF · JPG · PNG" 
           onClick={(e) => e.stopPropagation()}
         />
         <div style={{ fontSize: 26, marginBottom: 8 }}>📎</div>
-        <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, fontSize: 14, color: "var(--muted, #6b7599)" }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontWeight: 600, fontSize: 14, color: "var(--muted, #6b7599)" }}>
           Drop files or click to upload
         </div>
-        <div style={{ fontSize: 11, color: "#3a4260", fontFamily: "'IBM Plex Mono', monospace", marginTop: 5 }}>
+        <div style={{ fontSize: 11, color: "#3a4260", fontFamily: "'Inter', sans-serif", marginTop: 5 }}>
           {hint}
         </div>
       </div>
@@ -94,7 +94,7 @@ export function ProjectFilePicker({ projectId, selectedIds, loadingIds, onToggle
   return (
     <div style={{ marginBottom: 16 }}>
       <div style={{
-        fontSize: 11, fontFamily: "'DM Mono',monospace", color: "#909ab0",
+        fontSize: 11, fontFamily: "'Inter',sans-serif", color: "#909ab0",
         letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8,
       }}>
         {fetching ? "Loading project files…" : `Project files — click to include in generation`}

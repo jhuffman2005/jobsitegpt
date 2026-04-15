@@ -193,7 +193,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
             <div style={{ background: "rgba(74,144,226,0.06)", border: "1px solid rgba(74,144,226,0.2)", padding: "12px 16px", marginBottom: 20, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
               <span style={{ fontSize: 18 }}>📋</span>
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#4a90e2" }}>Scope loaded from ScopeGPT</div>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#4a90e2" }}>Scope loaded from ScopeGPT</div>
                 <div style={{ fontSize: 12, color: "#606880" }}>{scopeHandoff.projectName} · {scopeHandoff.trades?.length} trades · {scopeHandoff.estimatedDuration}</div>
               </div>
               <button className="btn btn-ghost" style={{ fontSize: 11, padding: "4px 10px" }} onClick={() => setScopeHandoff(null)}>✕ Clear</button>
@@ -285,13 +285,13 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
                     <tr key={t.id}>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "#c0c8d8" }}>{t.id}</td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8" }}>{t.id}</td>
                       <td style={{ fontWeight: 600 }}>{t.task}</td>
                       <td><span className="phase-pill" style={{ background: pc.bg, color: pc.color }}>{t.phase}</span></td>
                       <td style={{ color: "#606880" }}>{t.trade}</td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>Day {t.startDay}</td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{t.durationDays}d</td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 10, color: "#c0c8d8" }}>{t.dependencies.length ? t.dependencies.join(", ") : "—"}</td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11 }}>Day {t.startDay}</td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11 }}>{t.durationDays}d</td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8" }}>{t.dependencies.length ? t.dependencies.join(", ") : "—"}</td>
                     </tr>
                   );
                 })}
@@ -312,7 +312,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{s.trade}</td>
                       <td><span className="phase-pill" style={{ background: pc.bg, color: pc.color }}>{s.phase}</span></td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 11 }}>{s.estimatedDays}d</td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11 }}>{s.estimatedDays}d</td>
                       <td style={{ fontSize: 11, color: "#606880" }}>{s.recommendedSubTypes.join(", ")}</td>
                       <td style={{ fontSize: 11, color: "#606880" }}>{s.scope}</td>
                     </tr>

@@ -33,7 +33,7 @@ export default function ProjectSwitcher({ activeProject, onProjectChange }) {
         <div style={{ flex: 1 }}>
           {activeProject ? (
             <>
-              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>
+              <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e" }}>
                 {activeProject.name}
               </div>
               <div style={{ fontSize: 11, color: "#909ab0" }}>
@@ -42,14 +42,14 @@ export default function ProjectSwitcher({ activeProject, onProjectChange }) {
             </>
           ) : (
             <>
-              <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#909ab0" }}>
+              <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#909ab0" }}>
                 No project selected
               </div>
               <div style={{ fontSize: 11, color: "#c0c8d8" }}>Click to select a project</div>
             </>
           )}
         </div>
-        <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#c0c8d8" }}>{open ? "▲" : "▼"}</span>
+        <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 12, color: "#c0c8d8" }}>{open ? "▲" : "▼"}</span>
       </div>
 
       {open && (
@@ -90,17 +90,17 @@ export default function ProjectSwitcher({ activeProject, onProjectChange }) {
                   onMouseEnter={e => e.currentTarget.style.background = "rgba(240,165,0,0.04)"}
                   onMouseLeave={e => e.currentTarget.style.background = activeProject?.id === p.id ? "rgba(240,165,0,0.06)" : "#ffffff"}
                 >
-                  <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e", marginBottom: 2 }}>
+                  <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e", marginBottom: 2 }}>
                     {p.name}
-                    {activeProject?.id === p.id && <span style={{ marginLeft: 8, fontSize: 10, color: "#f0a500", fontFamily: "'DM Mono',monospace" }}>ACTIVE</span>}
+                    {activeProject?.id === p.id && <span style={{ marginLeft: 8, fontSize: 10, color: "#f0a500", fontFamily: "'Inter',sans-serif" }}>ACTIVE</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>
+                  <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif" }}>
                     {[p.client_name, p.address].filter(Boolean).join(" · ") || "No details"}
                   </div>
                 </div>
               ))}
               <div
-                style={{ padding: "12px 16px", fontSize: 12, color: "#4a90e2", cursor: "pointer", fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, letterSpacing: "0.06em" }}
+                style={{ padding: "12px 16px", fontSize: 12, color: "#4a90e2", cursor: "pointer", fontFamily: "'Inter',sans-serif", fontWeight: 700, letterSpacing: "0.06em" }}
                 onClick={() => { setOpen(false); navigate("/projects"); }}
               >
                 + MANAGE PROJECTS

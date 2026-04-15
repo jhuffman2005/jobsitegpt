@@ -84,7 +84,7 @@ export default function App() {
   if (user === undefined) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "#909ab0" }}>Loading…</div>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#909ab0" }}>Loading…</div>
       </div>
     );
   }

@@ -64,11 +64,8 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
     });
   }, [activeProject?.id]);
   const [budgetMode, setBudgetMode] = useState(false);
-  const [showNewJob, setShowNewJob] = useState(false);
   const [toast, showToast] = useToast();
 
-  const [newJobName, setNewJobName] = useState("");
-  const [newJobClient, setNewJobClient] = useState("");
   const [logDate, setLogDate] = useState(new Date().toISOString().split("T")[0]);
   const [logPayee, setLogPayee] = useState("");
   const [logCode, setLogCode] = useState("");
@@ -77,6 +74,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const [logDesc, setLogDesc] = useState("");
   const [acList, setAcList] = useState([]);
   const [acIdx, setAcIdx] = useState(-1);
+  const [acFocused, setAcFocused] = useState(false);
   const [voiceText, setVoiceText] = useState("");
   const [voiceStatus, setVoiceStatus] = useState("");
   const [payLabel, setPayLabel] = useState("");
@@ -94,26 +92,22 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
     localStorage.setItem("fl_budgets", JSON.stringify(b));
   }, []);
 
-  const addJob = () => {
-    if (!newJobName.trim()) return;
-    const name = newJobName.trim() || activeProject?.name || "";
-    const client = newJobClient.trim() || activeProject?.client_name || "";
-    const j = { id: Date.now().toString(), projectId: activeProject?.id || null, name, client, created: new Date().toISOString() };
-    const updated = [...jobs, j];
-    persist(updated, entries, payments, budgets);
-    setActiveJob(j.id); setNewJobName(""); setNewJobClient(""); setShowNewJob(false);
-    showToast("Job created!");
-  };
-
   const allCodes = useCallback(() => {
     const used = [...new Set(entries.map((e) => e.code))];
-    const base = savedCostCodes.length > 0 ? savedCostCodes : DEFAULT_COST_CODES;
+    const base = savedCostCodes.length > 0 ? savedCostCodes : [];
     return [...new Set([...used, ...base])].sort();
   }, [entries, savedCostCodes]);
 
+  const onCodeFocus = () => {
+    setAcFocused(true);
+    const codes = allCodes();
+    setAcList(codes.slice(0, 8));
+    setAcIdx(-1);
+  };
+
   const onCodeInput = (val) => {
     setLogCode(val);
-    if (!val.trim()) { setAcList([]); return; }
+    if (!val.trim()) { setAcList(allCodes().slice(0, 8)); return; }
     setAcList(allCodes().filter((c) => c.toLowerCase().includes(val.toLowerCase())).slice(0, 8));
     setAcIdx(-1);
   };
@@ -139,7 +133,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const parseVoice = async () => {
     if (!voiceText.trim()) return;
     setVoiceStatus("Parsing…");
-    const codeSources = allCodes();
+    const codeSources = allCodes().length > 0 ? allCodes() : DEFAULT_COST_CODES;
     try {
       const r = await callClaude(
         [{ role: "user", content: `Parse this expense into JSON only, no markdown:\n"${voiceText}"\n${specialInstructions ? `Context: ${specialInstructions}\n` : ""}Return: {"payee":"string","amount":0,"code":"string","pay":"Cash","desc":"string"}\ncode: pick the closest from ${codeSources.join(", ")}\npay: one of ${PAYMENT_TYPES.join(", ")}` }],
@@ -198,40 +192,11 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
     <div className="fade-up">
       <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
 
-      <div className="fl-job-bar">
-        <label className="field-label" style={{ margin: 0, whiteSpace: "nowrap" }}>Active Job</label>
-        <select value={activeJob} onChange={(e) => setActiveJob(e.target.value)} style={{ flex: 1, minWidth: 180 }}>
-          <option value="">— Select a job —</option>
-          {jobs.map((j) => <option key={j.id} value={j.id}>{j.name}{j.client ? ` · ${j.client}` : ""}</option>)}
-        </select>
-        <button className="btn" onClick={() => setShowNewJob((v) => !v)}>+ New Job</button>
-      </div>
-
-      {showNewJob && (
-        <div className="fl-card fade-up" style={{ marginBottom: 20, border: "1.5px solid #f0a500" }}>
-          <div className="section-label">Create Job</div>
-          <div className="row-2 input-group">
-            <div>
-              <label className="field-label">Job Name *</label>
-              <input type="text" placeholder={activeProject?.name || "Oak Valley Kitchen Remodel"} value={newJobName} onChange={(e) => setNewJobName(e.target.value)} />
-            </div>
-            <div>
-              <label className="field-label">Client Name</label>
-              <input type="text" placeholder={activeProject?.client_name || "Johnson Family"} value={newJobClient} onChange={(e) => setNewJobClient(e.target.value)} />
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button className="btn btn-primary" disabled={!newJobName.trim()} onClick={addJob}>Create Job</button>
-            <button className="btn btn-ghost" onClick={() => setShowNewJob(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-
       {!activeJob ? (
         <div style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "40px 32px", textAlign: "center", color: "#909ab0", borderRadius: 8 }}>
           <div style={{ fontSize: 28, marginBottom: 12 }}>📒</div>
-          <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16, marginBottom: 6, color: "#1a1f2e" }}>No job selected</div>
-          <div style={{ fontSize: 13 }}>Create a job above or select an existing one to start logging expenses.</div>
+          <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 6, color: "#1a1f2e" }}>No project selected</div>
+          <div style={{ fontSize: 13 }}>Select a project from the top bar to start tracking expenses.</div>
         </div>
       ) : (
         <>
@@ -252,7 +217,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                     <button className="btn btn-primary" style={{ padding: "9px 14px", fontSize: 12 }} disabled={!voiceText.trim()} onClick={parseVoice}>Parse →</button>
                   </div>
                 </div>
-                {voiceStatus && <div style={{ fontSize: 12, color: voiceStatus.startsWith("✓") ? "#27ae60" : "#909ab0", fontFamily: "'DM Mono',monospace" }}>{voiceStatus}</div>}
+                {voiceStatus && <div style={{ fontSize: 12, color: voiceStatus.startsWith("✓") ? "#27ae60" : "#909ab0", fontFamily: "'Inter',sans-serif" }}>{voiceStatus}</div>}
               </div>
 
               <div className="fl-card">
@@ -264,12 +229,28 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                 <div className="row-3 input-group">
                   <div style={{ position: "relative" }}>
                     <label className="field-label">Cost Code *</label>
-                    <input type="text" placeholder="Type to search…" value={logCode} onChange={(e) => onCodeInput(e.target.value)} onKeyDown={onCodeKey} onBlur={() => setTimeout(() => setAcList([]), 150)} autoComplete="off" />
-                    {acList.length > 0 && (
+                    <input
+                      type="text"
+                      placeholder={savedCostCodes.length === 0 && allCodes().length === 0 ? "Add cost codes in Settings…" : "Type to search…"}
+                      value={logCode}
+                      onChange={(e) => onCodeInput(e.target.value)}
+                      onFocus={onCodeFocus}
+                      onKeyDown={onCodeKey}
+                      onBlur={() => setTimeout(() => { setAcList([]); setAcFocused(false); }, 150)}
+                      autoComplete="off"
+                    />
+                    {acList.length > 0 ? (
                       <div className="fl-ac-list">
                         {acList.map((c, i) => (
                           <div key={c} className={`fl-ac-item${i === acIdx ? " selected" : ""}`} onMouseDown={() => { setLogCode(c); setAcList([]); }}>{c}</div>
                         ))}
+                      </div>
+                    ) : acFocused && savedCostCodes.length === 0 && allCodes().length === 0 && (
+                      <div className="fl-ac-list">
+                        <div style={{ padding: "10px 14px", fontSize: 12, color: "#909ab0", fontStyle: "italic" }}>
+                          No cost codes saved —{" "}
+                          <a href="/settings" style={{ color: "#f0a500", textDecoration: "none" }}>add them in Settings</a>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -294,8 +275,8 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
           {tab === "ledger" && (
             <div className="fl-card">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, color: "#1a1f2e" }}>{activeJobObj?.name} — All Expenses</div>
-                <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#c47f00" }}>{fmt(jobEntries.reduce((a, e) => a + e.amount, 0))} total</div>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 15, color: "#1a1f2e" }}>{activeJobObj?.name} — All Expenses</div>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 12, color: "#c47f00" }}>{fmt(jobEntries.reduce((a, e) => a + e.amount, 0))} total</div>
               </div>
               {jobEntries.length === 0 ? (
                 <div style={{ textAlign: "center", padding: "32px 0", color: "#909ab0", fontSize: 13 }}>No expenses logged yet.</div>
@@ -309,7 +290,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                       <div className="fl-mono" style={{ color: "#909ab0" }}>{e.date}</div>
                       <div style={{ fontWeight: 600, fontSize: 12 }}>{e.code}</div>
                       <div style={{ fontSize: 12, color: "#1a1f2e" }}>{[e.payee, e.desc].filter(Boolean).join(" — ") || "—"}</div>
-                      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>{e.pay}</div>
+                      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif" }}>{e.pay}</div>
                       <div className="fl-mono" style={{ color: "#c47f00" }}>{fmt(e.amount)}</div>
                       <div style={{ cursor: "pointer", color: "#c0c8d8", fontSize: 13, textAlign: "center" }} onClick={() => deleteEntry(e.id)}>✕</div>
                     </div>
@@ -333,7 +314,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
               <div style={{ display: "flex", gap: 12, marginBottom: 18, alignItems: "center" }}>
                 <button className="btn btn-primary" onClick={exportRecon}>⬇ Export (.TSV)</button>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
-                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "#909ab0" }}>Budget mode</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#909ab0" }}>Budget mode</span>
                   <div onClick={() => setBudgetMode((v) => !v)} style={{ width: 36, height: 20, background: budgetMode ? "#f0a500" : "#e0e4ef", borderRadius: 10, cursor: "pointer", position: "relative", transition: "background 0.2s" }}>
                     <div style={{ position: "absolute", top: 3, left: budgetMode ? 19 : 3, width: 14, height: 14, background: "#fff", borderRadius: "50%", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }} />
                   </div>
@@ -381,8 +362,8 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                   })
                 )}
                 <div className="fl-total-bar">
-                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em", color: "#1a1f2e" }}>TOTAL JOB COST</span>
-                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 20, color: "#c47f00" }}>{fmt(total)}</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em", color: "#1a1f2e" }}>TOTAL JOB COST</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 20, color: "#c47f00" }}>{fmt(total)}</span>
                 </div>
               </div>
 
@@ -392,7 +373,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                   <div key={p.id} className="fl-pay-row">
                     <div style={{ fontSize: 13, color: "#1a1f2e" }}>{p.label}</div>
                     <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                      <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 13, color: "#27ae60" }}>{fmt(p.amount)}</span>
+                      <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 13, color: "#27ae60" }}>{fmt(p.amount)}</span>
                       <span style={{ cursor: "pointer", color: "#c0c8d8", fontSize: 13 }} onClick={() => persist(jobs, entries, payments.filter((x) => x.id !== p.id), budgets)}>✕</span>
                     </div>
                   </div>
@@ -403,8 +384,8 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
                   <button className="btn btn-primary" disabled={!payAmt} onClick={addPayment}>+ Add</button>
                 </div>
                 <div className="fl-total-bar" style={{ borderTopColor: balanceDue > 0 ? "#e74c3c" : "#27ae60" }}>
-                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em", color: "#1a1f2e" }}>BALANCE DUE</span>
-                  <span style={{ fontFamily: "'DM Mono',monospace", fontSize: 20, color: balanceDue > 0 ? "#e74c3c" : "#27ae60" }}>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 15, letterSpacing: "0.06em", color: "#1a1f2e" }}>BALANCE DUE</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif", fontSize: 20, color: balanceDue > 0 ? "#e74c3c" : "#27ae60" }}>
                     {fmt(Math.abs(balanceDue))}{balanceDue <= 0 ? " ✓" : ""}
                   </span>
                 </div>

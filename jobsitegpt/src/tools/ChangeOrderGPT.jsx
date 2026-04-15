@@ -276,7 +276,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
           )}
 
           {markup > 0 && (
-            <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "10px 14px", marginBottom: 22, borderRadius: 6, fontSize: 12, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>
+            <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.15)", padding: "10px 14px", marginBottom: 22, borderRadius: 6, fontSize: 12, color: "#909ab0", fontFamily: "'Inter',sans-serif" }}>
               Using {markup}% markup from project settings for overhead + profit
             </div>
           )}
@@ -316,7 +316,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
       {status === "done" && result && (
         <>
           <div className="result-header-card">
-            <div style={{ fontFamily: "'DM Mono',monospace", fontSize: 11, color: "#909ab0", marginBottom: 4 }}>
+            <div style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#909ab0", marginBottom: 4 }}>
               CHANGE ORDER #{result.changeOrderNumber} · {result.date}
             </div>
             <div className="result-title">{result.title}</div>
@@ -377,7 +377,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
                   <div className="co-line" style={{ padding: 0, borderBottom: "none" }}>
                     <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setEditingLine(i)}>
                       <div className="co-line-desc">{li.description}</div>
-                      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'DM Mono',monospace" }}>
+                      <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif" }}>
                         {li.trade} · {li.quantity} {li.unit} @ {fmt(li.unitPrice)}
                         <span style={{ marginLeft: 8, color: "#c0c8d8" }}>✏ click to edit</span>
                       </div>
@@ -392,7 +392,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
               {[["Subtotal", result.subtotal], ["Overhead", result.overhead], ["Profit", result.profit]].map(([l, v]) => (
                 <div key={l} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#909ab0" }}>
                   <span>{l}</span>
-                  <span style={{ fontFamily: "'DM Mono',monospace" }}>{fmt(v)}</span>
+                  <span style={{ fontFamily: "'Inter',sans-serif" }}>{fmt(v)}</span>
                 </div>
               ))}
             </div>
@@ -415,7 +415,7 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
           )}
 
           <div style={{ background: "rgba(240,165,0,0.06)", border: "1px solid rgba(240,165,0,0.2)", padding: "16px 20px", borderRadius: 8, marginTop: 8 }}>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e", marginBottom: 6 }}>Client Approval</div>
+            <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 13, color: "#1a1f2e", marginBottom: 6 }}>Client Approval</div>
             <div style={{ fontSize: 12, color: "#606880", marginBottom: 14 }}>
               Send for approval to get a digital sign-off from your client. They'll receive an email with an approve button.
               {contractorEmail && <span> A signed copy will be sent to <strong>{contractorEmail}</strong>.</span>}

@@ -107,7 +107,7 @@ export default function Approve() {
   if (loading) {
     return (
       <div style={centeredPage}>
-        <div style={{ color: "#909ab0", fontSize: 13, fontFamily: "'DM Mono',monospace" }}>Loading…</div>
+        <div style={{ color: "#909ab0", fontSize: 13, fontFamily: "'Inter',sans-serif" }}>Loading…</div>
       </div>
     );
   }
