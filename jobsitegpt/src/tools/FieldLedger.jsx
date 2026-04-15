@@ -39,6 +39,30 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
       if (codes.length > 0) setSavedCostCodes(codes);
     }).catch(() => {});
   }, []);
+
+  // When active project changes, auto-select or auto-create the matching job
+  useEffect(() => {
+    if (!activeProject?.id) return;
+    setJobs((currentJobs) => {
+      const existing = currentJobs.find((j) => j.projectId === activeProject.id);
+      if (existing) {
+        setActiveJob(existing.id);
+        return currentJobs;
+      }
+      // Auto-create a job linked to this project
+      const newJob = {
+        id: Date.now().toString(),
+        projectId: activeProject.id,
+        name: activeProject.name,
+        client: activeProject.client_name || "",
+        created: new Date().toISOString(),
+      };
+      const updated = [...currentJobs, newJob];
+      localStorage.setItem("fl_jobs", JSON.stringify(updated));
+      setActiveJob(newJob.id);
+      return updated;
+    });
+  }, [activeProject?.id]);
   const [budgetMode, setBudgetMode] = useState(false);
   const [showNewJob, setShowNewJob] = useState(false);
   const [toast, showToast] = useToast();
@@ -74,7 +98,7 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
     if (!newJobName.trim()) return;
     const name = newJobName.trim() || activeProject?.name || "";
     const client = newJobClient.trim() || activeProject?.client_name || "";
-    const j = { id: Date.now().toString(), name, client, created: new Date().toISOString() };
+    const j = { id: Date.now().toString(), projectId: activeProject?.id || null, name, client, created: new Date().toISOString() };
     const updated = [...jobs, j];
     persist(updated, entries, payments, budgets);
     setActiveJob(j.id); setNewJobName(""); setNewJobClient(""); setShowNewJob(false);
