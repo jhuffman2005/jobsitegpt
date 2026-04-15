@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { getApproval, updateApprovalStatus } from "../lib/projects";
+import { getApproval } from "../lib/projects";
 
 const fmt = (p) =>
   `$${Number(p || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -31,16 +31,23 @@ export default function Approve() {
     setActionStatus("working");
     setActionError("");
     try {
-      await updateApprovalStatus(token, "approved");
+      const res = await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, status: "approved" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Update failed");
 
-      // Email contractor if address is stored
-      if (approval?.contractor_email) {
+      // Email contractor if address is stored on the record
+      const contractorEmail = data.contractor_email || approval?.contractor_email;
+      if (contractorEmail) {
         const r = approval.co_data;
         await fetch("/api/email", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            to: approval.contractor_email,
+            to: contractorEmail,
             subject: `✓ Signed: Change Order #${r.changeOrderNumber} — ${r.title}`,
             html: `
               <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -80,9 +87,17 @@ export default function Approve() {
   const handleDecline = async () => {
     setActionStatus("working");
     try {
-      await updateApprovalStatus(token, "declined");
+      const res = await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, status: "declined" }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Update failed");
+      }
       setActionStatus("declined");
-    } catch {
+    } catch (e) {
       setActionError("Something went wrong. Please try again.");
       setActionStatus("idle");
     }
