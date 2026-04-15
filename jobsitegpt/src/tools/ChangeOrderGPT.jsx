@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast, useVoiceInput } from "../lib/hooks";
-import { storeApproval, saveGeneration, getUserSettings } from "../lib/projects";
+import { storeApproval, saveGeneration, getUserSettings, getGenerationById } from "../lib/projects";
 import { ProcessingSteps, UploadZone, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 
@@ -16,6 +17,8 @@ const fmt = (p) =>
   `$${Number(p || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const historyId = searchParams.get("historyId");
   const { files, b64, add, remove, reset: resetFiles } = useFiles();
   const [projectName, setProjectName] = useState("");
   const [clientName, setClientName] = useState("");
@@ -44,6 +47,23 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
       if (s.contractor_email) setContractorEmail(s.contractor_email);
     }).catch(() => {});
   }, []);
+
+  // Hydrate from a saved generation when navigated here with ?historyId=
+  useEffect(() => {
+    if (!historyId) return;
+    let cancelled = false;
+    (async () => {
+      const g = await getGenerationById(historyId);
+      if (cancelled) return;
+      if (g?.result_data) {
+        setResult(g.result_data);
+        setStatus("done");
+        setError("");
+        setEmailSent(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [historyId]);
 
   const { isRecording, toggle: toggleVoice } = useVoiceInput((transcript) => {
     setDescription((prev) => (prev ? prev + " " + transcript : transcript));
@@ -104,6 +124,11 @@ export default function ChangeOrderGPT({ activeProject, onProjectChange }) {
     resetFiles(); setProjectName(""); setClientName(""); setClientEmail("");
     setDescription(""); setSpecialInstructions("");
     setStatus("idle"); setResult(null); setError(""); setEmailSent(false);
+    if (historyId) {
+      const p = new URLSearchParams(searchParams);
+      p.delete("historyId");
+      setSearchParams(p, { replace: true });
+    }
   };
 
   const recalcTotals = (lineItems) => {
