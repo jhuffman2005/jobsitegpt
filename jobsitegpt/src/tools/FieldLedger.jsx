@@ -79,6 +79,21 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
   const [voiceStatus, setVoiceStatus] = useState("");
   const [payLabel, setPayLabel] = useState("");
   const [payAmt, setPayAmt] = useState("");
+  const [ledgerSort, setLedgerSort] = useState({ key: "code", dir: "asc" });
+
+  const toggleLedgerSort = (key) => {
+    setLedgerSort((s) => {
+      if (s.key !== key) {
+        // sensible default direction per column type
+        const defaultDir = (key === "date" || key === "amount") ? "desc" : "asc";
+        return { key, dir: defaultDir };
+      }
+      return { key, dir: s.dir === "asc" ? "desc" : "asc" };
+    });
+  };
+
+  const sortIndicator = (key) =>
+    ledgerSort.key !== key ? "" : (ledgerSort.dir === "asc" ? " ▲" : " ▼");
 
   const { isRecording, toggle: toggleVoice } = useVoiceInput((t) =>
     setVoiceText((prev) => (prev ? prev + " " + t : t))
@@ -283,9 +298,37 @@ export default function FieldLedger({ activeProject, onProjectChange }) {
               ) : (
                 <>
                   <div className="fl-entry-hdr">
-                    {["Date","Cost Code","Payee / Desc","Pay Method","Amount",""].map((h, i) => <div key={i} className="fl-hdr-cell">{h}</div>)}
+                    {[
+                      { key: "date", label: "Date" },
+                      { key: "code", label: "Cost Code" },
+                      { key: "payee", label: "Payee / Desc" },
+                      { key: "pay", label: "Pay Method" },
+                      { key: "amount", label: "Amount" },
+                      { key: null, label: "" },
+                    ].map((h, i) => (
+                      <div
+                        key={i}
+                        className="fl-hdr-cell"
+                        onClick={h.key ? () => toggleLedgerSort(h.key) : undefined}
+                        style={h.key ? { cursor: "pointer", userSelect: "none" } : undefined}
+                        title={h.key ? "Click to sort" : undefined}
+                      >
+                        {h.label}{h.key ? sortIndicator(h.key) : ""}
+                      </div>
+                    ))}
                   </div>
-                  {[...jobEntries].sort((a, b) => b.date.localeCompare(a.date)).map((e) => (
+                  {[...jobEntries].sort((a, b) => {
+                    const { key, dir } = ledgerSort;
+                    const mul = dir === "asc" ? 1 : -1;
+                    const va = a[key], vb = b[key];
+                    if (key === "amount") return ((Number(va) || 0) - (Number(vb) || 0)) * mul;
+                    if (key === "payee") {
+                      const sa = [a.payee, a.desc].filter(Boolean).join(" — ");
+                      const sb = [b.payee, b.desc].filter(Boolean).join(" — ");
+                      return sa.localeCompare(sb) * mul;
+                    }
+                    return String(va ?? "").localeCompare(String(vb ?? "")) * mul;
+                  }).map((e) => (
                     <div key={e.id} className="fl-entry-row">
                       <div className="fl-mono" style={{ color: "#909ab0" }}>{e.date}</div>
                       <div style={{ fontWeight: 600, fontSize: 12 }}>{e.code}</div>
