@@ -275,6 +275,28 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       setSaving(false);
     }
   };
+
+  // Auto-save edits back to Supabase so navigating away via history links
+  // shows the edited version. Debounced to avoid a request per keystroke.
+  useEffect(() => {
+    if (!dirty || !generationId || !result) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await updateGeneration(generationId, {
+          title: result.projectName,
+          summary: result.overview,
+          result_data: result,
+        });
+        setDirty(false);
+      } catch (e) {
+        console.warn("Auto-save failed:", e.message);
+      } finally {
+        setSaving(false);
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [dirty, generationId, result]);
   const updateTrade = (tradeId, field, value) =>
     updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId ? { ...t, [field]: value } : t) }));
   const updateLineItem = (tradeId, idx, field, value) =>
