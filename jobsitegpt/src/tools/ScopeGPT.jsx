@@ -5,6 +5,7 @@ import { useFiles, useToast } from "../lib/hooks";
 import { getProjectFileAsBase64, saveGeneration, getGenerationById } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
+import SendToClientModal from "../components/SendToClientModal";
 
 const STEPS = [
   "Uploading documents…",
@@ -35,6 +36,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [result, setResult] = useState(loadSavedResult);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
+  const [sendOpen, setSendOpen] = useState(false);
 
   // Project file picker state
   const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
@@ -192,6 +194,93 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     return lines.join("\n");
   };
 
+  // Persisting edits: update result and mirror to sessionStorage
+  const updateResult = (updater) => {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const next = updater(prev);
+      try { sessionStorage.setItem("jsg_scope_result", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const updateTrade = (tradeId, field, value) =>
+    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId ? { ...t, [field]: value } : t) }));
+  const updateLineItem = (tradeId, idx, field, value) =>
+    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId
+      ? { ...t, lineItems: t.lineItems.map((li, i) => i === idx ? { ...li, [field]: value } : li) }
+      : t) }));
+  const deleteLineItem = (tradeId, idx) =>
+    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId
+      ? { ...t, lineItems: t.lineItems.filter((_, i) => i !== idx) }
+      : t) }));
+  const addLineItem = (tradeId) =>
+    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId
+      ? { ...t, lineItems: [...(t.lineItems || []), { description: "", note: null }] }
+      : t) }));
+  const updateNote = (field, idx, value) =>
+    updateResult((r) => ({ ...r, [field]: (r[field] || []).map((x, i) => i === idx ? value : x) }));
+  const deleteNote = (field, idx) =>
+    updateResult((r) => ({ ...r, [field]: (r[field] || []).filter((_, i) => i !== idx) }));
+  const addNote = (field) =>
+    updateResult((r) => ({ ...r, [field]: [...(r[field] || []), ""] }));
+  const updateOverview = (value) => updateResult((r) => ({ ...r, overview: value }));
+
+  const esc = (s) => String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+  const toEmailHtml = (r, clientName) => {
+    const tradeBlocks = r.trades.map((t, i) => `
+      <div style="margin:0 0 22px;padding:16px 18px;background:#f8f9fc;border:1px solid #e0e4ef;border-radius:8px;">
+        <div style="font-size:11px;letter-spacing:0.08em;color:#909ab0;text-transform:uppercase;margin-bottom:4px;">Trade #${String(i + 1).padStart(2, "0")} · ${esc(t.contractor)}</div>
+        <div style="font-weight:700;font-size:16px;color:#1a1f2e;margin-bottom:8px;">${esc(t.tradeName)}</div>
+        <div style="font-size:13px;line-height:1.6;color:#1a1f2e;margin-bottom:10px;">${esc(t.scopeText)}</div>
+        ${t.lineItems?.length ? `<ul style="margin:0;padding-left:18px;color:#1a1f2e;">${t.lineItems.map((li) => `<li style="font-size:13px;line-height:1.6;margin-bottom:3px;">${esc(li.description)}${li.note ? ` <span style="color:#909ab0;font-style:italic;">— ${esc(li.note)}</span>` : ""}</li>`).join("")}</ul>` : ""}
+      </div>`).join("");
+
+    const listSection = (title, items) => items?.length
+      ? `<h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:24px 0 10px;">${title}</h3>
+         <ul style="margin:0;padding-left:18px;color:#1a1f2e;">${items.map((x) => `<li style="font-size:13px;line-height:1.6;margin-bottom:4px;">${esc(x)}</li>`).join("")}</ul>`
+      : "";
+
+    return `<!doctype html><html><body style="margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#1a1f2e;">
+      <div style="max-width:680px;margin:0 auto;padding:24px;">
+        <div style="background:#ffffff;border:1px solid #e0e4ef;border-top:3px solid #f0a500;border-radius:8px;padding:28px 30px;">
+          <div style="font-size:11px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin-bottom:8px;">Scope of Work</div>
+          <h1 style="font-size:24px;margin:0 0 6px;color:#1a1f2e;letter-spacing:0.02em;">${esc(r.projectName)}</h1>
+          <div style="font-size:12px;color:#909ab0;">${esc(r.projectType)}${r.projectAddress ? ` · ${esc(r.projectAddress)}` : ""} · ${esc(r.estimatedDuration)}</div>
+          ${clientName ? `<p style="font-size:14px;color:#1a1f2e;margin:22px 0 0;">Hi ${esc(clientName)},</p>
+          <p style="font-size:14px;color:#1a1f2e;line-height:1.6;margin:8px 0 0;">Please find below the proposed scope of work for your project. Let me know if you have any questions or would like to discuss changes.</p>` : ""}
+          <h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:24px 0 10px;">Overview</h3>
+          <div style="font-size:14px;line-height:1.65;color:#1a1f2e;margin-bottom:18px;">${esc(r.overview)}</div>
+          <h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:24px 0 10px;">Scope by Trade</h3>
+          ${tradeBlocks}
+          ${listSection("General Conditions", r.generalConditions)}
+          ${listSection("Exclusions", r.exclusions)}
+          ${listSection("Clarifications", r.clarifications)}
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #f0f2f5;font-size:11px;color:#909ab0;">Sent via JobSiteGPT</div>
+        </div>
+      </div>
+    </body></html>`;
+  };
+
+  const sendToClient = async ({ clientName, clientEmail }) => {
+    const res = await fetch("/api/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: clientEmail,
+        subject: `Scope of Work — ${result.projectName}`,
+        html: toEmailHtml(result, clientName),
+        from_name: "JobSiteGPT",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Email failed");
+    setSendOpen(false);
+    showToast("Scope sent to client!");
+  };
+
   return (
     <div className="fade-up">
       <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
@@ -262,6 +351,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
             <div className="result-actions">
               <button className="btn btn-primary" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ Download</button>
               <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>⧉ Copy</button>
+              <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
               <button className="btn btn-ghost" onClick={reset}>↩ New Scope</button>
             </div>
           </div>
@@ -287,48 +377,114 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
             <div key={t.id} className="trade-block">
               <div className="trade-header">
                 <span className="trade-num">#{String(t.id).padStart(2, "0")}</span>
-                <span className="trade-name">{t.tradeName}</span>
-                <span className="trade-badge">{t.contractor}</span>
+                <input
+                  className="edit-input"
+                  style={{ flex: 1, fontWeight: 700, fontSize: 16, letterSpacing: "0.04em", color: "#1a1f2e" }}
+                  value={t.tradeName}
+                  onChange={(e) => updateTrade(t.id, "tradeName", e.target.value)}
+                />
+                <input
+                  className="edit-input"
+                  style={{ width: 160, fontSize: 11, color: "#c47f00", textAlign: "center" }}
+                  value={t.contractor}
+                  onChange={(e) => updateTrade(t.id, "contractor", e.target.value)}
+                />
               </div>
               <div className="trade-body">
-                <div className="scope-text">{t.scopeText}</div>
+                <textarea
+                  className="edit-textarea"
+                  style={{ fontSize: 13, lineHeight: 1.7, color: "#1a1f2e", marginBottom: 12 }}
+                  value={t.scopeText}
+                  onChange={(e) => updateTrade(t.id, "scopeText", e.target.value)}
+                />
                 <div className="line-items">
                   {t.lineItems.map((li, i) => (
-                    <div key={i} className="line-item">
+                    <div key={i} className="line-item editable-row">
                       <span className="line-bullet">▸</span>
-                      <div>
-                        <div>{li.description}</div>
-                        {li.note && <div className="line-note">{li.note}</div>}
+                      <div className="edit-body">
+                        <input
+                          className="edit-input"
+                          style={{ fontSize: 13 }}
+                          value={li.description}
+                          onChange={(e) => updateLineItem(t.id, i, "description", e.target.value)}
+                          placeholder="Line item description"
+                        />
+                        <input
+                          className="edit-input"
+                          style={{ fontSize: 11, fontStyle: "italic", color: "#909ab0" }}
+                          value={li.note || ""}
+                          onChange={(e) => updateLineItem(t.id, i, "note", e.target.value || null)}
+                          placeholder="Optional note"
+                        />
                       </div>
+                      <button
+                        type="button"
+                        className="delete-icon-btn"
+                        title="Delete line"
+                        onClick={() => deleteLineItem(t.id, i)}
+                      >🗑</button>
                     </div>
                   ))}
                 </div>
+                <button type="button" className="add-line-btn" onClick={() => addLineItem(t.id)}>＋ Add Line</button>
               </div>
             </div>
           ))}
 
-          {result.generalConditions?.length > 0 && (
-            <><div className="section-label" style={{ marginTop: 22 }}>General Conditions</div>
-            <div className="notes-block"><div className="notes-list">{result.generalConditions.map((g, i) => <div key={i} className="notes-item">{g}</div>)}</div></div></>
-          )}
-          {result.exclusions?.length > 0 && (
-            <><div className="section-label">Exclusions</div>
-            <div className="notes-block"><div className="notes-list">{result.exclusions.map((e, i) => <div key={i} className="notes-item">{e}</div>)}</div></div></>
-          )}
-          {result.clarifications?.length > 0 && (
-            <><div className="section-label">Clarifications</div>
-            <div className="notes-block"><div className="notes-list">{result.clarifications.map((c, i) => <div key={i} className="notes-item">{c}</div>)}</div></div></>
-          )}
+          {renderNotesSection("General Conditions", "generalConditions", result.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
+          {renderNotesSection("Exclusions", "exclusions", result.exclusions, { updateNote, deleteNote, addNote })}
+          {renderNotesSection("Clarifications", "clarifications", result.clarifications, { updateNote, deleteNote, addNote })}
 
           <div className="result-actions" style={{ marginTop: 24 }}>
             <button className="btn btn-primary" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ Download Scope</button>
+            <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
             <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={goToSchedule}>📅 Open in ScheduleGPT</button>
             <button className="btn btn-ghost" onClick={reset}>↩ Start Over</button>
           </div>
         </>
       )}
 
+      <SendToClientModal
+        isOpen={sendOpen}
+        onClose={() => setSendOpen(false)}
+        onSend={sendToClient}
+        projectName={result?.projectName}
+        docType="Scope of Work"
+      />
       {toast && <div className="toast">✓ {toast}</div>}
     </div>
+  );
+}
+
+function renderNotesSection(title, field, items, helpers) {
+  const { updateNote, deleteNote, addNote, topMargin } = helpers;
+  const list = items || [];
+  return (
+    <>
+      <div className="section-label" style={topMargin ? { marginTop: topMargin } : undefined}>{title}</div>
+      <div className="notes-block">
+        <div className="notes-list">
+          {list.map((val, i) => (
+            <div key={i} className="notes-item editable-row" style={{ display: "flex" }}>
+              <div className="edit-body" style={{ flex: 1 }}>
+                <input
+                  className="edit-input"
+                  value={val}
+                  onChange={(e) => updateNote(field, i, e.target.value)}
+                  placeholder={`${title.slice(0, -1)}…`}
+                />
+              </div>
+              <button
+                type="button"
+                className="delete-icon-btn"
+                title="Delete"
+                onClick={() => deleteNote(field, i)}
+              >🗑</button>
+            </div>
+          ))}
+        </div>
+        <button type="button" className="add-line-btn" onClick={() => addNote(field)}>＋ Add Line</button>
+      </div>
+    </>
   );
 }

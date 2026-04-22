@@ -5,6 +5,7 @@ import { useFiles, useToast } from "../lib/hooks";
 import { getProjectFileAsBase64, saveGeneration, getGenerationById } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
+import SendToClientModal from "../components/SendToClientModal";
 
 const STEPS = [
   "Uploading documents…",
@@ -44,6 +45,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
+  const [sendOpen, setSendOpen] = useState(false);
   const [scopeHandoff, setScopeHandoff] = useState(null); // scope data passed from ScopeGPT
 
   // Project file picker state
@@ -198,12 +200,106 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     const lines = [`PROJECT GANTT — ${result.projectName}\n`];
     lines.push("TASK SCHEDULE");
     lines.push(["#","Task","Phase","Trade","Start Day","Duration","Dependencies","Notes"].join("\t"));
-    result.tasks.forEach((t) => lines.push([t.id, t.task, t.phase, t.trade, `Day ${t.startDay}`, `${t.durationDays}d`, t.dependencies.join(",") || "—", t.notes || ""].join("\t")));
+    result.tasks.forEach((t) => lines.push([t.id, t.task, t.phase, t.trade, `Day ${t.startDay}`, `${t.durationDays}d`, (t.dependencies || []).join(",") || "—", t.notes || ""].join("\t")));
     lines.push(`\nSUBCONTRACTOR WORKSHEET`);
     lines.push(["Trade","Phase","Est. Days","Sub Types","Scope"].join("\t"));
-    result.subcontractors.forEach((s) => lines.push([s.trade, s.phase, s.estimatedDays, s.recommendedSubTypes.join(", "), s.scope].join("\t")));
+    result.subcontractors.forEach((s) => lines.push([s.trade, s.phase, s.estimatedDays, (s.recommendedSubTypes || []).join(", "), s.scope].join("\t")));
     downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Gantt.tsv`, lines.join("\n"));
     showToast("Downloaded!");
+  };
+
+  const updateResult = (updater) => setResult((prev) => prev ? updater(prev) : prev);
+  const updateTask = (idx, field, value) =>
+    updateResult((r) => ({ ...r, tasks: r.tasks.map((t, i) => i === idx ? { ...t, [field]: value } : t) }));
+  const deleteTask = (idx) =>
+    updateResult((r) => ({ ...r, tasks: r.tasks.filter((_, i) => i !== idx) }));
+  const addTask = () => {
+    updateResult((r) => {
+      const nextId = (r.tasks.reduce((m, t) => Math.max(m, Number(t.id) || 0), 0) || 0) + 1;
+      const defaultPhase = r.phases?.[0] || "";
+      return {
+        ...r,
+        tasks: [...r.tasks, { id: nextId, task: "", phase: defaultPhase, startDay: 1, durationDays: 1, dependencies: [], trade: "", notes: "" }],
+      };
+    });
+  };
+  const updateSub = (idx, field, value) =>
+    updateResult((r) => ({ ...r, subcontractors: r.subcontractors.map((s, i) => i === idx ? { ...s, [field]: value } : s) }));
+  const deleteSub = (idx) =>
+    updateResult((r) => ({ ...r, subcontractors: r.subcontractors.filter((_, i) => i !== idx) }));
+  const addSub = () => {
+    updateResult((r) => ({
+      ...r,
+      subcontractors: [...(r.subcontractors || []), { trade: "", phase: r.phases?.[0] || "", estimatedDays: 0, recommendedSubTypes: [], scope: "" }],
+    }));
+  };
+
+  const esc = (s) => String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+  const toEmailHtml = (r, clientName) => {
+    const taskRows = r.tasks.map((t) => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc(t.id)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:13px;font-weight:600;">${esc(t.task)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(t.phase)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(t.trade)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;">Day ${esc(t.startDay)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;">${esc(t.durationDays)}d</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc((t.dependencies || []).join(", ") || "—")}</td>
+      </tr>`).join("");
+
+    const subRows = (r.subcontractors || []).map((s) => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:13px;font-weight:600;">${esc(s.trade)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(s.phase)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;">${esc(s.estimatedDays)}d</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#606880;">${esc((s.recommendedSubTypes || []).join(", "))}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(s.scope)}</td>
+      </tr>`).join("");
+
+    const thStyle = "background:#f5f7fa;padding:8px 10px;text-align:left;font-family:Inter,sans-serif;font-size:10px;letter-spacing:0.1em;color:#909ab0;text-transform:uppercase;border-bottom:1.5px solid #e0e4ef;";
+
+    return `<!doctype html><html><body style="margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#1a1f2e;">
+      <div style="max-width:780px;margin:0 auto;padding:24px;">
+        <div style="background:#ffffff;border:1px solid #e0e4ef;border-top:3px solid #f0a500;border-radius:8px;padding:28px 30px;">
+          <div style="font-size:11px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin-bottom:8px;">Project Schedule</div>
+          <h1 style="font-size:24px;margin:0 0 6px;color:#1a1f2e;letter-spacing:0.02em;">${esc(r.projectName)}</h1>
+          <div style="font-size:12px;color:#909ab0;">${esc(r.totalDays)} days · ${r.tasks.length} tasks · ${r.phases.length} phases</div>
+          ${clientName ? `<p style="font-size:14px;color:#1a1f2e;margin:22px 0 0;">Hi ${esc(clientName)},</p>
+          <p style="font-size:14px;color:#1a1f2e;line-height:1.6;margin:8px 0 0;">Here is the proposed construction schedule for your project. Let me know if you have any questions.</p>` : ""}
+          <h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:24px 0 10px;">Task Schedule</h3>
+          <table style="width:100%;border-collapse:collapse;border:1px solid #e0e4ef;border-radius:6px;overflow:hidden;">
+            <thead><tr><th style="${thStyle}">#</th><th style="${thStyle}">Task</th><th style="${thStyle}">Phase</th><th style="${thStyle}">Trade</th><th style="${thStyle}">Start</th><th style="${thStyle}">Days</th><th style="${thStyle}">Deps</th></tr></thead>
+            <tbody>${taskRows}</tbody>
+          </table>
+          ${subRows ? `<h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:26px 0 10px;">Subcontractor Worksheet</h3>
+          <table style="width:100%;border-collapse:collapse;border:1px solid #e0e4ef;border-radius:6px;overflow:hidden;">
+            <thead><tr><th style="${thStyle}">Trade</th><th style="${thStyle}">Phase</th><th style="${thStyle}">Est. Days</th><th style="${thStyle}">Sub Types</th><th style="${thStyle}">Scope</th></tr></thead>
+            <tbody>${subRows}</tbody>
+          </table>` : ""}
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #f0f2f5;font-size:11px;color:#909ab0;">Sent via JobSiteGPT</div>
+        </div>
+      </div>
+    </body></html>`;
+  };
+
+  const sendToClient = async ({ clientName, clientEmail }) => {
+    const res = await fetch("/api/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: clientEmail,
+        subject: `Project Schedule — ${result.projectName}`,
+        html: toEmailHtml(result, clientName),
+        from_name: "JobSiteGPT",
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Email failed");
+    setSendOpen(false);
+    showToast("Schedule sent to client!");
   };
 
   return (
@@ -295,6 +391,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
           <div className="result-actions" style={{ marginBottom: 22 }}>
             <button className="btn btn-primary" onClick={exportTSV}>⬇ Download Gantt (.TSV)</button>
+            <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
             <button className="btn btn-ghost" onClick={reset}>↩ New Schedule</button>
           </div>
 
@@ -302,52 +399,132 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
           <div style={{ overflowX: "auto", marginBottom: 24 }}>
             <table className="gantt-table">
               <thead>
-                <tr>{["#","Task","Phase","Trade","Start","Days","Deps"].map((h) => <th key={h}>{h}</th>)}</tr>
+                <tr>{["#","Task","Phase","Trade","Start","Days","Deps"].map((h) => <th key={h}>{h}</th>)}<th></th></tr>
               </thead>
               <tbody>
-                {result.tasks.map((t) => {
+                {result.tasks.map((t, idx) => {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
-                    <tr key={t.id}>
-                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8" }}>{t.id}</td>
-                      <td style={{ fontWeight: 600 }}>{t.task}</td>
-                      <td><span className="phase-pill" style={{ background: pc.bg, color: pc.color }}>{t.phase}</span></td>
-                      <td style={{ color: "#606880" }}>{t.trade}</td>
-                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11 }}>Day {t.startDay}</td>
-                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11 }}>{t.durationDays}d</td>
-                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8" }}>{t.dependencies.length ? t.dependencies.join(", ") : "—"}</td>
+                    <tr key={`${t.id}-${idx}`}>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{t.id}</td>
+                      <td>
+                        <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
+                          value={t.task}
+                          onChange={(e) => updateTask(idx, "task", e.target.value)} />
+                      </td>
+                      <td style={{ minWidth: 110 }}>
+                        <select
+                          className="edit-input"
+                          style={{ background: pc.bg, color: pc.color, fontSize: 11, padding: "3px 5px", border: "1px solid transparent", borderRadius: 4 }}
+                          value={t.phase}
+                          onChange={(e) => updateTask(idx, "phase", e.target.value)}
+                        >
+                          {result.phases.map((p) => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ color: "#606880", minWidth: 100 }}>
+                        <input className="edit-input" style={{ fontSize: 12, color: "#606880" }}
+                          value={t.trade}
+                          onChange={(e) => updateTask(idx, "trade", e.target.value)} />
+                      </td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 80 }}>
+                        <input className="edit-input" style={{ fontSize: 11, width: 60 }} type="number" min="1"
+                          value={t.startDay}
+                          onChange={(e) => updateTask(idx, "startDay", Number(e.target.value) || 1)} />
+                      </td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 70 }}>
+                        <input className="edit-input" style={{ fontSize: 11, width: 50 }} type="number" min="1"
+                          value={t.durationDays}
+                          onChange={(e) => updateTask(idx, "durationDays", Number(e.target.value) || 1)} />
+                      </td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8", minWidth: 90 }}>
+                        <input className="edit-input" style={{ fontSize: 10, color: "#606880" }}
+                          value={(t.dependencies || []).join(", ")}
+                          onChange={(e) => updateTask(idx, "dependencies", e.target.value.split(",").map((s) => s.trim()).filter(Boolean).map((v) => Number(v) || v))}
+                          placeholder="e.g. 1, 2" />
+                      </td>
+                      <td className="row-delete-cell">
+                        <button
+                          type="button"
+                          className="delete-icon-btn"
+                          title="Delete task"
+                          onClick={() => deleteTask(idx)}
+                        >🗑</button>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            <button type="button" className="add-line-btn" onClick={addTask}>＋ Add Task</button>
           </div>
 
           <div className="section-label">Subcontractor Worksheet</div>
           <div style={{ overflowX: "auto" }}>
             <table className="sub-table">
               <thead>
-                <tr>{["Trade","Phase","Est. Days","Sub Types","Scope"].map((h) => <th key={h}>{h}</th>)}</tr>
+                <tr>{["Trade","Phase","Est. Days","Sub Types","Scope"].map((h) => <th key={h}>{h}</th>)}<th></th></tr>
               </thead>
               <tbody>
                 {result.subcontractors.map((s, i) => {
                   const pc = phaseMap[s.phase] || PHASE_COLORS[0];
                   return (
                     <tr key={i}>
-                      <td style={{ fontWeight: 600 }}>{s.trade}</td>
-                      <td><span className="phase-pill" style={{ background: pc.bg, color: pc.color }}>{s.phase}</span></td>
-                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11 }}>{s.estimatedDays}d</td>
-                      <td style={{ fontSize: 11, color: "#606880" }}>{s.recommendedSubTypes.join(", ")}</td>
-                      <td style={{ fontSize: 11, color: "#606880" }}>{s.scope}</td>
+                      <td style={{ minWidth: 120 }}>
+                        <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
+                          value={s.trade}
+                          onChange={(e) => updateSub(i, "trade", e.target.value)} />
+                      </td>
+                      <td style={{ minWidth: 110 }}>
+                        <select
+                          className="edit-input"
+                          style={{ background: pc.bg, color: pc.color, fontSize: 11, padding: "3px 5px", border: "1px solid transparent", borderRadius: 4 }}
+                          value={s.phase}
+                          onChange={(e) => updateSub(i, "phase", e.target.value)}
+                        >
+                          {result.phases.map((p) => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 90 }}>
+                        <input className="edit-input" style={{ fontSize: 11, width: 60 }} type="number" min="0"
+                          value={s.estimatedDays}
+                          onChange={(e) => updateSub(i, "estimatedDays", Number(e.target.value) || 0)} />
+                      </td>
+                      <td style={{ fontSize: 11, color: "#606880", minWidth: 160 }}>
+                        <input className="edit-input" style={{ fontSize: 11, color: "#606880" }}
+                          value={(s.recommendedSubTypes || []).join(", ")}
+                          onChange={(e) => updateSub(i, "recommendedSubTypes", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} />
+                      </td>
+                      <td style={{ fontSize: 11, color: "#606880", minWidth: 180 }}>
+                        <input className="edit-input" style={{ fontSize: 11, color: "#606880" }}
+                          value={s.scope}
+                          onChange={(e) => updateSub(i, "scope", e.target.value)} />
+                      </td>
+                      <td className="row-delete-cell">
+                        <button
+                          type="button"
+                          className="delete-icon-btn"
+                          title="Delete row"
+                          onClick={() => deleteSub(i)}
+                        >🗑</button>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            <button type="button" className="add-line-btn" onClick={addSub}>＋ Add Subcontractor</button>
           </div>
         </>
       )}
 
+      <SendToClientModal
+        isOpen={sendOpen}
+        onClose={() => setSendOpen(false)}
+        onSend={sendToClient}
+        projectName={result?.projectName}
+        docType="Schedule"
+      />
       {toast && <div className="toast">✓ {toast}</div>}
     </div>
   );
