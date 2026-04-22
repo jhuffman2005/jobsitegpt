@@ -253,6 +253,28 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
       setSaving(false);
     }
   };
+
+  // Auto-save edits back to Supabase so navigating away via history links
+  // shows the edited version. Debounced to avoid a request per keystroke.
+  useEffect(() => {
+    if (!dirty || !generationId || !result) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await updateGeneration(generationId, {
+          title: result.projectName,
+          summary: `${result.tasks.length} tasks · ${result.phases.length} phases · ${result.totalDays} days`,
+          result_data: result,
+        });
+        setDirty(false);
+      } catch (e) {
+        console.warn("Auto-save failed:", e.message);
+      } finally {
+        setSaving(false);
+      }
+    }, 1200);
+    return () => clearTimeout(timer);
+  }, [dirty, generationId, result]);
   const updateTask = (idx, field, value) =>
     updateResult((r) => ({ ...r, tasks: r.tasks.map((t, i) => i === idx ? { ...t, [field]: value } : t) }));
   const deleteTask = (idx) =>
