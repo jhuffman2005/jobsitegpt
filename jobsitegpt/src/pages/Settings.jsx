@@ -14,8 +14,12 @@ const DEFAULT_COST_CODES = [
   "Trim & Finish","Windows & Doors",
 ];
 
+const MAX_LOGO_BYTES = 400 * 1024; // 400 KB — keeps user_metadata comfortably under limits
+
 export default function Settings() {
   const [contractorEmail, setContractorEmail] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [companyLogo, setCompanyLogo] = useState(""); // data URL
   const [codes, setCodes] = useState([]);
   const [newCode, setNewCode] = useState("");
   const [loading, setLoading] = useState(true);
@@ -31,6 +35,8 @@ export default function Settings() {
           getUserCostCodes(),
         ]);
         setContractorEmail(settings.contractor_email || "");
+        setCompanyName(settings.company_name || "");
+        setCompanyLogo(settings.company_logo || "");
         setCodes(savedCodes.length ? savedCodes : [...DEFAULT_COST_CODES]);
       } catch (e) {
         console.error("Settings load error:", e);
@@ -45,7 +51,11 @@ export default function Settings() {
     setSaving(true);
     try {
       await Promise.all([
-        saveUserSettings({ contractor_email: contractorEmail }),
+        saveUserSettings({
+          contractor_email: contractorEmail,
+          company_name: companyName,
+          company_logo: companyLogo,
+        }),
         saveUserCostCodes(codes),
       ]);
       showToast("Settings saved!");
@@ -54,6 +64,24 @@ export default function Settings() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const onLogoChange = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Please pick an image file");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      showToast(`Logo too large — please use an image under ${Math.round(MAX_LOGO_BYTES / 1024)} KB`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => setCompanyLogo(ev.target.result);
+    reader.onerror = () => showToast("Could not read image");
+    reader.readAsDataURL(file);
   };
 
   const addCode = () => {
@@ -125,6 +153,49 @@ export default function Settings() {
         />
         <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginTop: 6 }}>
           When a client approves a change order, a signed copy is sent to this address.
+        </div>
+      </div>
+
+      {/* Branding Section */}
+      <div className="section-label" style={{ marginTop: 32 }}>Branding</div>
+      <div style={{ fontSize: 13, color: "#606880", marginBottom: 16 }}>
+        Your company name and logo appear at the top of scopes and schedules you send to clients.
+      </div>
+      <div className="input-group" style={{ maxWidth: 500 }}>
+        <label className="field-label">Company Name</label>
+        <input
+          type="text"
+          placeholder="e.g. Ridgeline Construction, Inc."
+          value={companyName}
+          onChange={(e) => setCompanyName(e.target.value)}
+        />
+      </div>
+      <div className="input-group" style={{ maxWidth: 500 }}>
+        <label className="field-label">Company Logo</label>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div style={{
+            width: 120, height: 80, border: "1.5px dashed #d0d4e0", borderRadius: 6,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "#ffffff", overflow: "hidden", flexShrink: 0,
+          }}>
+            {companyLogo ? (
+              <img src={companyLogo} alt="Logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+            ) : (
+              <span style={{ fontSize: 10, color: "#c0c8d8", letterSpacing: "0.08em" }}>NO LOGO</span>
+            )}
+          </div>
+          <label className="btn" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            ⬆ {companyLogo ? "Replace" : "Upload"} Logo
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={onLogoChange} />
+          </label>
+          {companyLogo && (
+            <button type="button" className="btn btn-ghost" onClick={() => setCompanyLogo("")}>
+              Remove
+            </button>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginTop: 6 }}>
+          PNG, JPG, or SVG · max {Math.round(MAX_LOGO_BYTES / 1024)} KB · shows in client emails
         </div>
       </div>
 
