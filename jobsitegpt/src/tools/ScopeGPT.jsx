@@ -14,12 +14,28 @@ const STEPS = [
   "Finalizing scope document…",
 ];
 
-// Restore result from sessionStorage on page load (back button support)
-function loadSavedResult() {
+const STORAGE_KEY = "jsg_scope_result";
+
+// Restore result from sessionStorage on page load (back button support). The
+// stored blob is tagged with the project it belongs to, so a scope generated
+// under Project A never leaks into Project B.
+function loadSavedResult(projectId) {
   try {
-    const saved = sessionStorage.getItem("jsg_scope_result");
-    return saved ? JSON.parse(saved) : null;
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && "data" in parsed) {
+      if ((parsed.projectId || null) !== (projectId || null)) return null;
+      return parsed.data;
+    }
+    return null; // legacy/untagged blob — ignore
   } catch { return null; }
+}
+
+function persistResult(projectId, data) {
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ projectId: projectId || null, data }));
+  } catch {}
 }
 
 function parseLogoDataUrl(dataUrl) {
@@ -40,9 +56,9 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [projectType, setProjectType] = useState("Residential Remodel");
   const [notes, setNotes] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
-  const [status, setStatus] = useState(() => loadSavedResult() ? "done" : "idle");
+  const [status, setStatus] = useState(() => loadSavedResult(activeProject?.id) ? "done" : "idle");
   const [stepIdx, setStepIdx] = useState(0);
-  const [result, setResult] = useState(loadSavedResult);
+  const [result, setResult] = useState(() => loadSavedResult(activeProject?.id));
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
   const [sendOpen, setSendOpen] = useState(false);
@@ -54,14 +70,23 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
   const [loadingPF, setLoadingPF] = useState(new Set());
 
-  // Clear saved result when project changes so stale data from a previous project never shows.
-  // Skip clearing on the initial mount (so edits persist when navigating away and back) and
-  // when hydrating a historical generation via ?historyId=.
+  // When the active project changes, try to restore a scope saved for the new
+  // project. If nothing matches (different project, or sessionStorage is empty),
+  // clear the form so no stale data leaks across projects. The initial mount is
+  // a no-op because prevProjectIdRef starts at activeProject?.id.
   const prevProjectIdRef = useRef(activeProject?.id);
   useEffect(() => {
     if (historyId) return;
     if (activeProject?.id === prevProjectIdRef.current) return;
     prevProjectIdRef.current = activeProject?.id;
+
+    const saved = loadSavedResult(activeProject?.id);
+    if (saved) {
+      setResult(saved);
+      setStatus("done");
+      setError("");
+      return;
+    }
     setSelectedPF([]);
     setResult(null);
     setStatus("idle");
@@ -69,8 +94,9 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     setProjectName("");
     setNotes("");
     setSpecialInstructions("");
+    setGenerationId(null);
+    setDirty(false);
     resetFiles();
-    sessionStorage.removeItem("jsg_scope_result");
   }, [activeProject?.id]);
 
   // Hydrate from a saved generation when navigated here with ?historyId=
@@ -87,7 +113,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         setGenerationId(g.id);
         setDirty(false);
         // Persist for back-button support, mirroring a freshly-generated result
-        try { sessionStorage.setItem("jsg_scope_result", JSON.stringify(g.result_data)); } catch {}
+        persistResult(g.project_id ?? activeProject?.id, g.result_data);
       }
     })();
     return () => { cancelled = true; };
@@ -155,8 +181,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       setResult(r);
       setStatus("done");
 
-      // Persist for back-button support
-      sessionStorage.setItem("jsg_scope_result", JSON.stringify(r));
+      // Persist for back-button support, tagged with this project's id
+      persistResult(activeProject?.id, r);
 
       // localStorage history
       const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
@@ -190,7 +216,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     setProjectName(""); setNotes(""); setSpecialInstructions("");
     setSelectedPF([]); setStatus("idle"); setResult(null); setError("");
     setGenerationId(null); setDirty(false);
-    sessionStorage.removeItem("jsg_scope_result");
+    sessionStorage.removeItem(STORAGE_KEY);
     if (historyId) {
       const p = new URLSearchParams(searchParams);
       p.delete("historyId");
@@ -216,12 +242,13 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     return lines.join("\n");
   };
 
-  // Persisting edits: update result and mirror to sessionStorage
+  // Persisting edits: update result and mirror to sessionStorage (tagged with
+  // the current project so it never leaks into a different project's view).
   const updateResult = (updater) => {
     setResult((prev) => {
       if (!prev) return prev;
       const next = updater(prev);
-      try { sessionStorage.setItem("jsg_scope_result", JSON.stringify(next)); } catch {}
+      persistResult(activeProject?.id, next);
       return next;
     });
     setDirty(true);
