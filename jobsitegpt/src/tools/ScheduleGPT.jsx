@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { getProjectFileAsBase64, saveGeneration, getGenerationById, getUserSettings } from "../lib/projects";
+import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -33,6 +33,15 @@ function loadScopeHandoff() {
   } catch { return null; }
 }
 
+function parseLogoDataUrl(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== "string") return null;
+  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
+  if (!m) return null;
+  const mime = m[1];
+  const ext = (mime.split("/")[1] || "png").split("+")[0];
+  return { mime, base64: m[2], filename: `logo.${ext}` };
+}
+
 export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const historyId = searchParams.get("historyId");
@@ -46,6 +55,9 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
   const [sendOpen, setSendOpen] = useState(false);
+  const [generationId, setGenerationId] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [scopeHandoff, setScopeHandoff] = useState(null); // scope data passed from ScopeGPT
 
   // Project file picker state
@@ -77,6 +89,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
         setResult(g.result_data);
         setStatus("done");
         setError("");
+        setGenerationId(g.id);
+        setDirty(false);
       }
     })();
     return () => { cancelled = true; };
@@ -166,12 +180,16 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
       localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
 
       // Supabase history
+      setGenerationId(null);
+      setDirty(false);
       if (activeProject?.id) {
         saveGeneration(
           activeProject.id, "ScheduleGPT", r.projectName,
           `${r.tasks.length} tasks · ${r.phases.length} phases · ${r.totalDays} days`,
           r
-        );
+        ).then((row) => {
+          if (row?.id) setGenerationId(row.id);
+        });
       }
     } catch (e) {
       timers.forEach(clearTimeout);
@@ -185,6 +203,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     setProjectName(""); setSpecialInstructions("");
     setSelectedPF([]); setScopeHandoff(null);
     setStatus("idle"); setResult(null); setError("");
+    setGenerationId(null); setDirty(false);
     if (historyId) {
       const p = new URLSearchParams(searchParams);
       p.delete("historyId");
@@ -208,7 +227,32 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     showToast("Downloaded!");
   };
 
-  const updateResult = (updater) => setResult((prev) => prev ? updater(prev) : prev);
+  const updateResult = (updater) => {
+    setResult((prev) => prev ? updater(prev) : prev);
+    setDirty(true);
+  };
+
+  const saveChanges = async () => {
+    if (!result) return;
+    if (!generationId) {
+      showToast("No saved schedule to update — select or generate one under a project");
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateGeneration(generationId, {
+        title: result.projectName,
+        summary: `${result.tasks.length} tasks · ${result.phases.length} phases · ${result.totalDays} days`,
+        result_data: result,
+      });
+      setDirty(false);
+      showToast("Changes saved!");
+    } catch (e) {
+      showToast("Save failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const updateTask = (idx, field, value) =>
     updateResult((r) => ({ ...r, tasks: r.tasks.map((t, i) => i === idx ? { ...t, [field]: value } : t) }));
   const deleteTask = (idx) =>
@@ -239,7 +283,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
   const toEmailHtml = (r, clientName, branding = {}) => {
-    const { logo, companyName } = branding;
+    const { hasLogo, logoCid, companyName } = branding;
     const taskRows = r.tasks.map((t) => `
       <tr>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc(t.id)}</td>
@@ -262,11 +306,11 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
     const thStyle = "background:#f5f7fa;padding:8px 10px;text-align:left;font-family:Inter,sans-serif;font-size:10px;letter-spacing:0.1em;color:#909ab0;text-transform:uppercase;border-bottom:1.5px solid #e0e4ef;";
 
-    const brandingHeader = (logo || companyName)
-      ? `<div style="display:flex;align-items:center;gap:14px;padding-bottom:18px;margin-bottom:18px;border-bottom:1px solid #f0f2f5;">
-           ${logo ? `<img src="${logo}" alt="${esc(companyName || "Company")}" style="max-height:60px;max-width:180px;object-fit:contain;" />` : ""}
-           ${companyName ? `<div style="font-weight:700;font-size:15px;letter-spacing:0.04em;color:#1a1f2e;">${esc(companyName)}</div>` : ""}
-         </div>`
+    const brandingHeader = (hasLogo || companyName)
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-bottom:18px;"><tr>
+           ${hasLogo ? `<td style="padding:0 14px 18px 0;border-bottom:1px solid #f0f2f5;vertical-align:middle;width:1%;white-space:nowrap;"><img src="cid:${logoCid}" alt="${esc(companyName || "Company")}" style="display:block;max-height:60px;max-width:180px;object-fit:contain;border:0;outline:none;" /></td>` : ""}
+           ${companyName ? `<td style="padding:0 0 18px;border-bottom:1px solid #f0f2f5;vertical-align:middle;font-weight:700;font-size:15px;letter-spacing:0.04em;color:#1a1f2e;">${esc(companyName)}</td>` : ""}
+         </tr></table>`
       : "";
     const footerSender = companyName ? esc(companyName) : "JobSiteGPT";
 
@@ -296,20 +340,39 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   };
 
   const sendToClient = async ({ clientName, clientEmail }) => {
-    let branding = {};
+    let companyName = "";
+    let logoDataUrl = "";
     try {
       const settings = await getUserSettings();
-      branding = { logo: settings?.company_logo || "", companyName: settings?.company_name || "" };
+      companyName = settings?.company_name || "";
+      logoDataUrl = settings?.company_logo || "";
     } catch {}
-    const fromName = branding.companyName || "JobSiteGPT";
+
+    const attachments = [];
+    let hasLogo = false;
+    const logoCid = "company-logo";
+    const parsed = parseLogoDataUrl(logoDataUrl);
+    if (parsed) {
+      attachments.push({
+        filename: parsed.filename,
+        content: parsed.base64,
+        content_id: logoCid,
+        content_type: parsed.mime,
+        disposition: "inline",
+      });
+      hasLogo = true;
+    }
+
+    const fromName = companyName || "JobSiteGPT";
     const res = await fetch("/api/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: clientEmail,
         subject: `Project Schedule — ${result.projectName}`,
-        html: toEmailHtml(result, clientName, branding),
+        html: toEmailHtml(result, clientName, { hasLogo, logoCid, companyName }),
         from_name: fromName,
+        attachments,
       }),
     });
     const data = await res.json();
@@ -407,6 +470,16 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
           <div className="result-actions" style={{ marginBottom: 22 }}>
             <button className="btn btn-primary" onClick={exportTSV}>⬇ Download Gantt (.TSV)</button>
+            {generationId && (
+              <button
+                className="btn"
+                style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
+                disabled={saving || !dirty}
+                onClick={saveChanges}
+              >
+                {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
+              </button>
+            )}
             <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
             <button className="btn btn-ghost" onClick={reset}>↩ New Schedule</button>
           </div>

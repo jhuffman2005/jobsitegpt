@@ -205,6 +205,18 @@ export async function saveUserCostCodes(codes) {
   if (error) throw error;
 }
 
+export async function updateGeneration(id, fields) {
+  if (!id) return null;
+  const { data, error } = await supabase
+    .from("project_generations")
+    .update(fields)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // ── Single Generation (for "View in tool" click-through) ──────────────────
 
 export async function getGenerationById(id) {
