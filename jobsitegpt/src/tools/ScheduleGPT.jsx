@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { getProjectFileAsBase64, saveGeneration, getGenerationById } from "../lib/projects";
+import { getProjectFileAsBase64, saveGeneration, getGenerationById, getUserSettings } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -238,7 +238,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-  const toEmailHtml = (r, clientName) => {
+  const toEmailHtml = (r, clientName, branding = {}) => {
+    const { logo, companyName } = branding;
     const taskRows = r.tasks.map((t) => `
       <tr>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc(t.id)}</td>
@@ -261,9 +262,18 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
     const thStyle = "background:#f5f7fa;padding:8px 10px;text-align:left;font-family:Inter,sans-serif;font-size:10px;letter-spacing:0.1em;color:#909ab0;text-transform:uppercase;border-bottom:1.5px solid #e0e4ef;";
 
+    const brandingHeader = (logo || companyName)
+      ? `<div style="display:flex;align-items:center;gap:14px;padding-bottom:18px;margin-bottom:18px;border-bottom:1px solid #f0f2f5;">
+           ${logo ? `<img src="${logo}" alt="${esc(companyName || "Company")}" style="max-height:60px;max-width:180px;object-fit:contain;" />` : ""}
+           ${companyName ? `<div style="font-weight:700;font-size:15px;letter-spacing:0.04em;color:#1a1f2e;">${esc(companyName)}</div>` : ""}
+         </div>`
+      : "";
+    const footerSender = companyName ? esc(companyName) : "JobSiteGPT";
+
     return `<!doctype html><html><body style="margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#1a1f2e;">
       <div style="max-width:780px;margin:0 auto;padding:24px;">
         <div style="background:#ffffff;border:1px solid #e0e4ef;border-top:3px solid #f0a500;border-radius:8px;padding:28px 30px;">
+          ${brandingHeader}
           <div style="font-size:11px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin-bottom:8px;">Project Schedule</div>
           <h1 style="font-size:24px;margin:0 0 6px;color:#1a1f2e;letter-spacing:0.02em;">${esc(r.projectName)}</h1>
           <div style="font-size:12px;color:#909ab0;">${esc(r.totalDays)} days · ${r.tasks.length} tasks · ${r.phases.length} phases</div>
@@ -279,21 +289,27 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
             <thead><tr><th style="${thStyle}">Trade</th><th style="${thStyle}">Phase</th><th style="${thStyle}">Est. Days</th><th style="${thStyle}">Sub Types</th><th style="${thStyle}">Scope</th></tr></thead>
             <tbody>${subRows}</tbody>
           </table>` : ""}
-          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #f0f2f5;font-size:11px;color:#909ab0;">Sent via JobSiteGPT</div>
+          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #f0f2f5;font-size:11px;color:#909ab0;">Sent by ${footerSender} via JobSiteGPT</div>
         </div>
       </div>
     </body></html>`;
   };
 
   const sendToClient = async ({ clientName, clientEmail }) => {
+    let branding = {};
+    try {
+      const settings = await getUserSettings();
+      branding = { logo: settings?.company_logo || "", companyName: settings?.company_name || "" };
+    } catch {}
+    const fromName = branding.companyName || "JobSiteGPT";
     const res = await fetch("/api/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         to: clientEmail,
         subject: `Project Schedule — ${result.projectName}`,
-        html: toEmailHtml(result, clientName),
-        from_name: "JobSiteGPT",
+        html: toEmailHtml(result, clientName, branding),
+        from_name: fromName,
       }),
     });
     const data = await res.json();
