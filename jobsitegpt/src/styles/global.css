@@ -484,3 +484,120 @@ select {
 .fl-ac-list { position: absolute; top: 100%; left: 0; right: 0; background: #ffffff; border: 1.5px solid #d0d4e0; z-index: 10; max-height: 160px; overflow-y: auto; border-radius: 0 0 6px 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
 .fl-ac-item { padding: 8px 12px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; color: #1a1f2e; }
 .fl-ac-item:hover, .fl-ac-item.selected { background: rgba(240,165,0,0.06); color: #c47f00; }
+
+/* Inline-editable outputs (ScopeGPT / ScheduleGPT) */
+.edit-input,
+.edit-textarea {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background-color 0.15s, border-color 0.15s;
+  resize: vertical;
+}
+.edit-input:hover,
+.edit-textarea:hover { background: #f8f9fc; border-color: #e0e4ef; }
+.edit-input:focus,
+.edit-textarea:focus { background: #ffffff; border-color: #f0a500; box-shadow: 0 0 0 2px rgba(240,165,0,0.12); }
+.edit-textarea { min-height: 60px; }
+
+.editable-row { position: relative; display: flex; gap: 8px; align-items: flex-start; }
+.editable-row .edit-body { flex: 1; min-width: 0; }
+.delete-icon-btn {
+  opacity: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #909ab0;
+  font-size: 14px;
+  width: 26px;
+  height: 26px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  font-family: 'Inter', sans-serif;
+  padding: 0;
+}
+.editable-row:hover .delete-icon-btn,
+.delete-icon-btn:focus { opacity: 1; }
+.delete-icon-btn:hover { background: rgba(231,76,60,0.08); border-color: rgba(231,76,60,0.25); color: #e74c3c; }
+
+.add-line-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1.5px dashed #c0c8d8;
+  color: #606880;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  padding: 6px 14px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin-top: 8px;
+  transition: all 0.15s;
+}
+.add-line-btn:hover { border-color: #f0a500; color: #c47f00; background: rgba(240,165,0,0.04); }
+
+/* Editable table rows (ScheduleGPT) */
+.gantt-table td .edit-input,
+.sub-table td .edit-input { padding: 3px 5px; font-size: 12px; }
+.row-delete-cell { width: 36px; text-align: center; }
+.gantt-table tr .row-delete-cell .delete-icon-btn,
+.sub-table tr .row-delete-cell .delete-icon-btn { opacity: 0; }
+.gantt-table tr:hover .row-delete-cell .delete-icon-btn,
+.sub-table tr:hover .row-delete-cell .delete-icon-btn { opacity: 1; }
+
+/* Modal (Send to Client) */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 31, 46, 0.45);
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeUp 0.15s ease;
+}
+.modal-card {
+  background: #ffffff;
+  border: 1.5px solid #e0e4ef;
+  border-top: 3px solid #f0a500;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+}
+.modal-header {
+  padding: 20px 24px 6px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+  color: #1a1f2e;
+}
+.modal-sub {
+  padding: 0 24px 16px;
+  font-size: 12px;
+  color: #909ab0;
+}
+.modal-body { padding: 4px 24px 8px; }
+.modal-body .field-label { display: block; margin-top: 10px; margin-bottom: 4px; }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid #f0f2f5;
+  margin-top: 16px;
+}
