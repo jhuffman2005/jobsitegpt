@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { getProjectFiles, getProjectFileAsBase64 } from "../lib/projects";
 
-export function ProcessingSteps({ steps, idx }) {
+export function ProcessingSteps({ steps, idx, hint = "This usually takes 1–2 minutes — hang tight." }) {
   return (
     <div className="processing-wrap fade-up">
       <div className="processing-label">PROCESSING…</div>
@@ -18,6 +18,7 @@ export function ProcessingSteps({ steps, idx }) {
           </div>
         ))}
       </div>
+      {hint && <div className="processing-hint">{hint}</div>}
     </div>
   );
 }
