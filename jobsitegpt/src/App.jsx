@@ -24,6 +24,7 @@ function AppShell({ user }) {
       return saved ? JSON.parse(saved) : null;
     } catch { return null; }
   });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const setProject = (p) => {
     setActiveProject(p);
@@ -31,13 +32,17 @@ function AppShell({ user }) {
     else sessionStorage.removeItem("jsg_active_project");
   };
 
+  // Close mobile nav on route change
+  useEffect(() => { setMobileNavOpen(false); }, [location.pathname]);
+
   const toolProps = { activeProject, onProjectChange: setProject };
 
   return (
     <>
-      <Sidebar user={user} activeProject={activeProject} />
+      <Sidebar user={user} activeProject={activeProject} open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+      {mobileNavOpen && <div className="sidebar-backdrop" onClick={() => setMobileNavOpen(false)} />}
       <div className="main-wrap">
-        <PageHeader pathname={location.pathname} activeProject={activeProject} />
+        <PageHeader pathname={location.pathname} activeProject={activeProject} onMenuClick={() => setMobileNavOpen(true)} />
         <div className="page-content">
           <Routes>
             <Route path="/"             element={<Dashboard user={user} />} />
