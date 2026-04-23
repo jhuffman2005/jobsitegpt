@@ -42,10 +42,11 @@ function parseLogoDataUrl(dataUrl) {
   return { mime, base64: m[2], filename: `logo.${ext}` };
 }
 
-// Forward pass: push any task that starts before its dependencies finish.
-// Leaves a task alone if it already starts on/after all of its predecessors
-// (so a user can still set an intentional buffer). Safe against missing or
-// circular dependencies via an iteration cap.
+// Recompute startDay for any task that has dependencies so it sits exactly on
+// the earliest day after its predecessors finish. Tasks without dependencies
+// keep whatever startDay the user typed. This runs in both directions — if a
+// predecessor's duration shrinks, downstream tasks pull back. Safe against
+// missing or circular dependency edges via an iteration cap.
 function cascadeSchedule(tasks) {
   const next = tasks.map((t) => ({
     ...t,
@@ -58,14 +59,15 @@ function cascadeSchedule(tasks) {
   for (let i = 0; i < maxIter; i++) {
     let changed = false;
     for (const t of next) {
-      let earliest = 1;
+      if (t.dependencies.length === 0) continue; // root task — user-controlled
+      let earliest = null;
       for (const dep of t.dependencies) {
         const d = byId.get(String(dep));
         if (!d) continue;
-        const finish = d.startDay + d.durationDays; // next free day after dep
-        if (finish > earliest) earliest = finish;
+        const finish = d.startDay + d.durationDays; // first free day after dep
+        if (earliest === null || finish > earliest) earliest = finish;
       }
-      if (t.startDay < earliest) {
+      if (earliest !== null && t.startDay !== earliest) {
         t.startDay = earliest;
         changed = true;
       }
