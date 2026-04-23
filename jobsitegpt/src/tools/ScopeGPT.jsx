@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { callClaude, downloadTxt } from "../lib/api";
+import { callClaude, downloadTxt, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
 import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
@@ -139,6 +139,12 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   };
 
   const generate = async () => {
+    const sizeError = checkPayloadSize({ files, projectFiles: selectedPF });
+    if (sizeError) {
+      setError(sizeError);
+      setStatus("error");
+      return;
+    }
     setStatus("loading"); setStepIdx(0); setError("");
     const timers = STEPS.map((_, i) => setTimeout(() => setStepIdx(i), i * 1900));
     try {
