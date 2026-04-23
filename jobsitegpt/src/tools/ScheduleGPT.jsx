@@ -262,14 +262,14 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
   const exportTSV = () => {
     if (!result) return;
-    const lines = [`PROJECT GANTT — ${result.projectName}\n`];
+    const lines = [`PROJECT SCHEDULE — ${result.projectName}\n`];
     lines.push("TASK SCHEDULE");
     lines.push(["#","Task","Phase","Trade","Start Day","Duration","Dependencies","Notes"].join("\t"));
     result.tasks.forEach((t) => lines.push([t.id, t.task, t.phase, t.trade, `Day ${t.startDay}`, `${t.durationDays}d`, (t.dependencies || []).join(",") || "—", t.notes || ""].join("\t")));
     lines.push(`\nSUBCONTRACTOR WORKSHEET`);
     lines.push(["Trade","Phase","Est. Days","Sub Types","Scope"].join("\t"));
     result.subcontractors.forEach((s) => lines.push([s.trade, s.phase, s.estimatedDays, (s.recommendedSubTypes || []).join(", "), s.scope].join("\t")));
-    downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Gantt.tsv`, lines.join("\n"));
+    downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Schedule.tsv`, lines.join("\n"));
     showToast("Downloaded!");
   };
 
@@ -521,7 +521,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
             disabled={!scopeHandoff && files.length === 0 && selectedPF.length === 0 && !projName.trim()}
             onClick={generate}
           >
-            📅 Generate Gantt Chart
+            📅 Generate Schedule
           </button>
         </>
       )}
@@ -549,7 +549,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
           </div>
 
           <div className="result-actions" style={{ marginBottom: 22 }}>
-            <button className="btn btn-primary" onClick={exportTSV}>⬇ Download Gantt (.TSV)</button>
+            <button className="btn btn-primary" onClick={exportTSV}>⬇ Download Schedule (.TSV)</button>
             {generationId && (
               <button
                 className="btn"

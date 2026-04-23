@@ -506,7 +506,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           <div className="handoff-banner">
             <div style={{ fontSize: 22 }}>📅</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to build the Gantt chart?</div>
+              <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to build the schedule?</div>
               <div style={{ fontSize: 12, color: "#606880" }}>Scope data passes automatically — no download needed.</div>
             </div>
             <button

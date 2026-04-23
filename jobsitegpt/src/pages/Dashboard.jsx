@@ -12,8 +12,8 @@ const TOOLS = [
     to: "/schedule",
     name: "ScheduleGPT",
     badge: "02",
-    desc: "Upload scope or docs → complete Gantt chart with phases, dependencies, and subcontractor worksheet.",
-    flow: ["Scope / Docs", "→", "Gantt Chart"],
+    desc: "Upload scope or docs → complete project schedule with phases, dependencies, and subcontractor worksheet.",
+    flow: ["Scope / Docs", "→", "Schedule"],
   },
   {
     to: "/bidmatch",
