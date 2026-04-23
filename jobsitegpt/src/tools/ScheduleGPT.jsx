@@ -42,6 +42,46 @@ function parseLogoDataUrl(dataUrl) {
   return { mime, base64: m[2], filename: `logo.${ext}` };
 }
 
+// Forward pass: push any task that starts before its dependencies finish.
+// Leaves a task alone if it already starts on/after all of its predecessors
+// (so a user can still set an intentional buffer). Safe against missing or
+// circular dependencies via an iteration cap.
+function cascadeSchedule(tasks) {
+  const next = tasks.map((t) => ({
+    ...t,
+    startDay: Math.max(1, Number(t.startDay) || 1),
+    durationDays: Math.max(1, Number(t.durationDays) || 1),
+    dependencies: Array.isArray(t.dependencies) ? t.dependencies : [],
+  }));
+  const byId = new Map(next.map((t) => [String(t.id), t]));
+  const maxIter = next.length + 2;
+  for (let i = 0; i < maxIter; i++) {
+    let changed = false;
+    for (const t of next) {
+      let earliest = 1;
+      for (const dep of t.dependencies) {
+        const d = byId.get(String(dep));
+        if (!d) continue;
+        const finish = d.startDay + d.durationDays; // next free day after dep
+        if (finish > earliest) earliest = finish;
+      }
+      if (t.startDay < earliest) {
+        t.startDay = earliest;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return next;
+}
+
+function computeTotalDays(tasks) {
+  return tasks.reduce((max, t) => {
+    const finish = (Number(t.startDay) || 1) + (Number(t.durationDays) || 0) - 1;
+    return Math.max(max, finish);
+  }, 0);
+}
+
 export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const historyId = searchParams.get("historyId");
@@ -275,18 +315,30 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     }, 1200);
     return () => clearTimeout(timer);
   }, [dirty, generationId, result]);
+  // Whenever tasks change, cascade dependency starts forward and recompute totalDays.
+  const applyTaskChange = (r, nextTasks) => {
+    const cascaded = cascadeSchedule(nextTasks);
+    return { ...r, tasks: cascaded, totalDays: computeTotalDays(cascaded) };
+  };
+
   const updateTask = (idx, field, value) =>
-    updateResult((r) => ({ ...r, tasks: r.tasks.map((t, i) => i === idx ? { ...t, [field]: value } : t) }));
+    updateResult((r) => applyTaskChange(r, r.tasks.map((t, i) => i === idx ? { ...t, [field]: value } : t)));
   const deleteTask = (idx) =>
-    updateResult((r) => ({ ...r, tasks: r.tasks.filter((_, i) => i !== idx) }));
+    updateResult((r) => {
+      const removedId = r.tasks[idx]?.id;
+      const filtered = r.tasks
+        .filter((_, i) => i !== idx)
+        .map((t) => removedId != null
+          ? { ...t, dependencies: (t.dependencies || []).filter((d) => String(d) !== String(removedId)) }
+          : t);
+      return applyTaskChange(r, filtered);
+    });
   const addTask = () => {
     updateResult((r) => {
       const nextId = (r.tasks.reduce((m, t) => Math.max(m, Number(t.id) || 0), 0) || 0) + 1;
       const defaultPhase = r.phases?.[0] || "";
-      return {
-        ...r,
-        tasks: [...r.tasks, { id: nextId, task: "", phase: defaultPhase, startDay: 1, durationDays: 1, dependencies: [], trade: "", notes: "" }],
-      };
+      const nextTasks = [...r.tasks, { id: nextId, task: "", phase: defaultPhase, startDay: 1, durationDays: 1, dependencies: [], trade: "", notes: "" }];
+      return applyTaskChange(r, nextTasks);
     });
   };
   const updateSub = (idx, field, value) =>
