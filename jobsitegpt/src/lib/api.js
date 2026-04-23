@@ -97,3 +97,14 @@ export function downloadJson(filename, obj) {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+// Save HTML content as a .doc file. Word opens HTML natively when the file has
+// a .doc extension and the application/msword MIME type — no library needed.
+export function downloadDoc(filename, bodyHtml, title = "Document") {
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${title}</title><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]--><style>@page{size:8.5in 11in;margin:1in}body{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1f2e;line-height:1.5}</style></head><body>${bodyHtml}</body></html>`;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff", html], { type: "application/msword" }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}

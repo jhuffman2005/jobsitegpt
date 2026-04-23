@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { callClaude, downloadTxt, checkPayloadSize } from "../lib/api";
+import { callClaude, downloadTxt, downloadDoc, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
 import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings } from "../lib/projects";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
@@ -329,6 +329,35 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+  const toWordHtml = (r) => {
+    const tradeBlocks = r.trades.map((t, i) => `
+      <h2 style="font-size:14pt;color:#1a1f2e;margin:18pt 0 4pt;border-bottom:1pt solid #d0d4dc;padding-bottom:3pt;">${i + 1}. ${esc(t.tradeName)} <span style="font-size:10pt;color:#c47f00;font-weight:normal;">[${esc(t.contractor)}]</span></h2>
+      <p style="margin:6pt 0;">${esc(t.scopeText)}</p>
+      ${t.lineItems?.length ? `<ul style="margin:6pt 0 6pt 24pt;">${t.lineItems.map((li) => `<li style="margin-bottom:3pt;">${esc(li.description)}${li.note ? ` <i style="color:#606880;">— ${esc(li.note)}</i>` : ""}</li>`).join("")}</ul>` : ""}`).join("");
+
+    const listSection = (title, items) => items?.length
+      ? `<h2 style="font-size:13pt;color:#1a1f2e;margin:18pt 0 6pt;border-bottom:1pt solid #d0d4dc;padding-bottom:3pt;">${title}</h2>
+         <ul style="margin:6pt 0 6pt 24pt;">${items.map((x) => `<li style="margin-bottom:3pt;">${esc(x)}</li>`).join("")}</ul>`
+      : "";
+
+    return `
+      <h1 style="font-size:22pt;color:#1a1f2e;margin:0 0 4pt;">Scope of Work</h1>
+      <h2 style="font-size:16pt;color:#1a1f2e;margin:0 0 4pt;border:none;padding:0;">${esc(r.projectName)}</h2>
+      <p style="font-size:10pt;color:#606880;margin:0 0 18pt;">${esc(r.projectType)}${r.projectAddress ? ` · ${esc(r.projectAddress)}` : ""} · ${esc(r.estimatedDuration)}</p>
+      <h2 style="font-size:13pt;color:#1a1f2e;margin:18pt 0 6pt;border-bottom:1pt solid #d0d4dc;padding-bottom:3pt;">Overview</h2>
+      <p style="margin:6pt 0;">${esc(r.overview)}</p>
+      <h2 style="font-size:13pt;color:#1a1f2e;margin:18pt 0 6pt;border-bottom:1pt solid #d0d4dc;padding-bottom:3pt;">Scope by Trade</h2>
+      ${tradeBlocks}
+      ${listSection("General Conditions", r.generalConditions)}
+      ${listSection("Exclusions", r.exclusions)}
+      ${listSection("Clarifications", r.clarifications)}`;
+  };
+
+  const downloadWord = () => {
+    const safeName = result.projectName.replace(/\s+/g, "_");
+    downloadDoc(`${safeName}_Scope.doc`, toWordHtml(result), `${result.projectName} — Scope of Work`);
+  };
+
   const toEmailHtml = (r, clientName, branding = {}) => {
     const { hasLogo, logoCid, companyName } = branding;
     const tradeBlocks = r.trades.map((t, i) => `
@@ -485,7 +514,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
               {result.projectType}{result.projectAddress ? ` · ${result.projectAddress}` : ""} · {result.estimatedDuration} · {result.totalLineItemCount} line items / {result.trades.length} trades
             </div>
             <div className="result-actions">
-              <button className="btn btn-primary" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ Download</button>
+              <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
+              <button className="btn" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ .txt</button>
               <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>⧉ Copy</button>
               {generationId && (
                 <button
@@ -582,7 +612,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           {renderNotesSection("Clarifications", "clarifications", result.clarifications, { updateNote, deleteNote, addNote })}
 
           <div className="result-actions" style={{ marginTop: 24 }}>
-            <button className="btn btn-primary" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ Download Scope</button>
+            <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
+            <button className="btn" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ .txt</button>
             <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
             <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={goToSchedule}>📅 Open in ScheduleGPT</button>
             <button className="btn btn-ghost" onClick={reset}>↩ Start Over</button>
