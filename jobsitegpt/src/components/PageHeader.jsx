@@ -11,7 +11,7 @@ const META = {
   "/fieldledger": { badge: "05 / 05", title: "FieldLedger",    sub: "AI Job Cost Ledger" },
 };
 
-export default function PageHeader({ pathname, activeProject }) {
+export default function PageHeader({ pathname, activeProject, onMenuClick }) {
   const navigate = useNavigate();
   const isProjectDetail = pathname.startsWith("/projects/") && pathname !== "/projects";
   const meta = isProjectDetail
@@ -20,6 +20,14 @@ export default function PageHeader({ pathname, activeProject }) {
 
   return (
     <div className="page-header">
+      <button
+        type="button"
+        className="nav-hamburger"
+        aria-label="Open menu"
+        onClick={onMenuClick}
+      >
+        <span /><span /><span />
+      </button>
       <span className="page-title-badge">{meta.badge}</span>
       <span className="page-title">{meta.title}</span>
 

@@ -12,7 +12,7 @@ const NAV = [
   { to: "/fieldledger", label: "FieldLedger",    icon: "📒" },
 ];
 
-export default function Sidebar({ user, activeProject }) {
+export default function Sidebar({ user, activeProject, open, onClose }) {
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -20,7 +20,7 @@ export default function Sidebar({ user, activeProject }) {
   };
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar${open ? " mobile-open" : ""}`}>
       <div className="sidebar-logo" onClick={() => navigate("/")} style={{ cursor: "pointer" }}>
         <div><span className="logo-badge">JOBSITEGPT</span></div>
         <div className="logo-title">JobSiteGPT</div>
