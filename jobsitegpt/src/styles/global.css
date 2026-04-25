@@ -607,8 +607,12 @@ select {
   border-radius: 8px;
   width: 100%;
   max-width: 440px;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 12px 40px rgba(0,0,0,0.18);
 }
+.modal-card .modal-body { overflow-y: auto; }
 .modal-header {
   padding: 20px 24px 6px;
   font-family: 'Inter', sans-serif;

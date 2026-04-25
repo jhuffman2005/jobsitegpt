@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, downloadDoc, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings, createBidInvitation, getProjectBidInvitations } from "../lib/projects";
+import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings, getProjectBidInvitations } from "../lib/projects";
+import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -449,98 +450,6 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     showToast("Scope sent to client!");
   };
 
-  // Build a scope snapshot containing only the requested trade. Frontend pages
-  // (ScopeGPT, the public trade-bid page) all render the same shape, so we
-  // keep the full top-level project context but trim trades[] to just one.
-  const buildTradeSnapshot = (trade) => ({
-    projectName: result.projectName,
-    projectType: result.projectType,
-    projectAddress: result.projectAddress || null,
-    overview: result.overview,
-    generalConditions: result.generalConditions || [],
-    exclusions: result.exclusions || [],
-    clarifications: result.clarifications || [],
-    estimatedDuration: result.estimatedDuration,
-    trades: [trade],
-  });
-
-  const buildTradeEmailHtml = ({ token, trade, contactName, branding }) => {
-    const { hasLogo, logoCid, companyName } = branding || {};
-    const link = `${window.location.origin}/bid/${token}`;
-    const lineItems = trade.lineItems?.length
-      ? `<ul style="margin:8px 0 0;padding-left:18px;color:#1a1f2e;">${trade.lineItems.map((li) => `<li style="font-size:13px;line-height:1.6;margin-bottom:3px;">${esc(li.description)}${li.note ? ` <span style="color:#909ab0;font-style:italic;">— ${esc(li.note)}</span>` : ""}</li>`).join("")}</ul>`
-      : "";
-
-    const brandingHeader = (hasLogo || companyName)
-      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin-bottom:18px;"><tr>
-           ${hasLogo ? `<td style="padding:0 14px 18px 0;border-bottom:1px solid #f0f2f5;vertical-align:middle;width:1%;white-space:nowrap;"><img src="cid:${logoCid}" alt="${esc(companyName || "Company")}" style="display:block;max-height:60px;max-width:180px;object-fit:contain;border:0;outline:none;" /></td>` : ""}
-           ${companyName ? `<td style="padding:0 0 18px;border-bottom:1px solid #f0f2f5;vertical-align:middle;font-weight:700;font-size:15px;letter-spacing:0.04em;color:#1a1f2e;">${esc(companyName)}</td>` : ""}
-         </tr></table>`
-      : "";
-
-    const sender = companyName || "JobSiteGPT";
-    const greeting = contactName ? `Hi ${esc(contactName)},` : "Hello,";
-
-    return `<!doctype html><html><body style="margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Inter,sans-serif;color:#1a1f2e;">
-      <div style="max-width:680px;margin:0 auto;padding:24px;">
-        <div style="background:#ffffff;border:1px solid #e0e4ef;border-top:3px solid #f0a500;border-radius:8px;padding:28px 30px;">
-          ${brandingHeader}
-          <div style="font-size:11px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin-bottom:8px;">Bid Request · ${esc(trade.tradeName)}</div>
-          <h1 style="font-size:24px;margin:0 0 6px;color:#1a1f2e;letter-spacing:0.02em;">${esc(result.projectName)}</h1>
-          <div style="font-size:12px;color:#909ab0;">${esc(result.projectType)}${result.projectAddress ? ` · ${esc(result.projectAddress)}` : ""}</div>
-          <p style="font-size:14px;color:#1a1f2e;margin:22px 0 0;">${greeting}</p>
-          <p style="font-size:14px;color:#1a1f2e;line-height:1.6;margin:8px 0 0;">${esc(sender)} is requesting a bid for the <strong>${esc(trade.tradeName)}</strong> scope on the project above. Please review the scope and submit your pricing through the link below — no account needed.</p>
-
-          <div style="margin:24px 0 22px;padding:16px 18px;background:#f8f9fc;border:1px solid #e0e4ef;border-radius:8px;">
-            <div style="font-weight:700;font-size:15px;color:#1a1f2e;margin-bottom:8px;">${esc(trade.tradeName)} — Scope</div>
-            <div style="font-size:13px;line-height:1.6;color:#1a1f2e;">${esc(trade.scopeText)}</div>
-            ${lineItems}
-          </div>
-
-          <div style="text-align:center;margin:24px 0 8px;">
-            <a href="${link}" style="background:#f0a500;color:#000;padding:14px 32px;text-decoration:none;font-weight:bold;font-size:15px;border-radius:6px;display:inline-block;">→ Review Scope & Submit Bid</a>
-          </div>
-          <div style="text-align:center;font-size:11px;color:#909ab0;margin-top:8px;">Or paste this link into your browser: <span style="color:#606880;">${link}</span></div>
-
-          <div style="margin-top:28px;padding-top:16px;border-top:1px solid #f0f2f5;font-size:11px;color:#909ab0;">Sent by ${esc(sender)} via JobSiteGPT</div>
-        </div>
-      </div>
-    </body></html>`;
-  };
-
-  const sendToOneTrade = async ({ tradeName, contractor, contactName, email, branding }) => {
-    const trade = result.trades.find((t) => t.tradeName === tradeName);
-    if (!trade) throw new Error("Trade not found in scope");
-
-    // 1) Persist the invitation (gets a token)
-    const inv = await createBidInvitation({
-      projectId: activeProject?.id || null,
-      generationId: generationId || null,
-      tradeName,
-      tradeContactName: contactName,
-      tradeEmail: email,
-      scopeSnapshot: buildTradeSnapshot({ ...trade, contractor: contractor || trade.contractor }),
-    });
-
-    // 2) Email the trade their tokenized link
-    const fromName = branding?.companyName || "JobSiteGPT";
-    const html = buildTradeEmailHtml({ token: inv.token, trade, contactName, branding });
-    const res = await fetch("/api/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        to: email,
-        subject: `Bid Request — ${result.projectName} · ${tradeName}`,
-        html,
-        from_name: fromName,
-        attachments: branding?.attachments || [],
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Email failed");
-    return inv;
-  };
-
   const openSendToTrades = async () => {
     if (activeProject?.id) {
       try {
@@ -555,34 +464,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     setTradesOpen(true);
   };
 
-  // Resolves branding once and reuses it across the per-trade emails
-  const resolveBranding = async () => {
-    let companyName = "";
-    let logoDataUrl = "";
-    try {
-      const settings = await getUserSettings();
-      companyName = settings?.company_name || "";
-      logoDataUrl = settings?.company_logo || "";
-    } catch {}
-    const attachments = [];
-    let hasLogo = false;
-    const logoCid = "company-logo";
-    const parsed = parseLogoDataUrl(logoDataUrl);
-    if (parsed) {
-      attachments.push({
-        filename: parsed.filename,
-        content: parsed.base64,
-        content_id: logoCid,
-        content_type: parsed.mime,
-        disposition: "inline",
-      });
-      hasLogo = true;
-    }
-    return { companyName, hasLogo, logoCid, attachments };
-  };
-
   // Branding (logo + company name) loaded once when the modal opens, then
-  // closed over by sendToOneTrade so each per-trade email reuses it.
+  // closed over by the per-row send so each email reuses it.
   const [tradeBranding, setTradeBranding] = useState(null);
   useEffect(() => {
     if (!tradesOpen) { setTradeBranding(null); return; }
@@ -590,7 +473,19 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     resolveBranding().then((b) => { if (!cancelled) setTradeBranding(b); });
     return () => { cancelled = true; };
   }, [tradesOpen]);
-  const tradeSendHandler = (row) => sendToOneTrade({ ...row, branding: tradeBranding || {} });
+  const tradeSendHandler = (row) => {
+    const trade = result.trades.find((t) => t.tradeName === row.tradeName);
+    if (!trade) throw new Error("Trade not found in scope");
+    return sendTradeInvitation({
+      scope: result,
+      trade: { ...trade, contractor: row.contractor || trade.contractor },
+      contactName: row.contactName,
+      email: row.email,
+      branding: tradeBranding || {},
+      projectId: activeProject?.id || null,
+      generationId: generationId || null,
+    });
+  };
 
   return (
     <div className="fade-up">
