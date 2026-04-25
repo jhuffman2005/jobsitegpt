@@ -238,6 +238,89 @@ export async function getGenerationById(id) {
   }
 }
 
+// ── Bid Invitations & Trade Bids ──────────────────────────────────────────
+
+function makeToken(prefix = "bid") {
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `${prefix}-${Date.now().toString(36)}-${rand}`;
+}
+
+export async function createBidInvitation({ projectId, generationId, tradeName, tradeContactName, tradeEmail, scopeSnapshot, expiresInDays = 14 }) {
+  const { data: { user } } = await supabase.auth.getUser();
+  const token = makeToken();
+  const expiresAt = expiresInDays
+    ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
+    : null;
+  const { data, error } = await supabase
+    .from("bid_invitations")
+    .insert({
+      token,
+      user_id: user.id,
+      project_id: projectId || null,
+      generation_id: generationId || null,
+      trade_name: tradeName,
+      trade_contact_name: tradeContactName || null,
+      trade_email: tradeEmail,
+      scope_snapshot: scopeSnapshot,
+      expires_at: expiresAt,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getBidInvitation(token) {
+  const { data, error } = await supabase
+    .from("bid_invitations")
+    .select("*")
+    .eq("token", token)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// All invitations a GC has sent for a given project (for the BidMatch dashboard)
+export async function getProjectBidInvitations(projectId) {
+  if (!projectId) return [];
+  const { data, error } = await supabase
+    .from("bid_invitations")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("sent_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// All submitted bids for a project, grouped by invitation
+export async function getProjectTradeBids(projectId) {
+  if (!projectId) return [];
+  const { data, error } = await supabase
+    .from("trade_bids")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("submitted_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// Bid lookup for the trade's own confirmation page (no auth)
+export async function getTradeBidByInvitation(invitationId) {
+  if (!invitationId) return null;
+  const { data, error } = await supabase
+    .from("trade_bids")
+    .select("*")
+    .eq("invitation_id", invitationId)
+    .order("submitted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.warn("getTradeBidByInvitation failed:", error.message);
+    return null;
+  }
+  return data;
+}
+
 // ── User Settings ─────────────────────────────────────────────────────────
 
 export async function saveUserSettings(settings) {
