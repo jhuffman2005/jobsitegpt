@@ -10,6 +10,7 @@ import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
 import Approve from "./pages/Approve";
+import TradeBid from "./pages/TradeBid";
 import ScopeGPT from "./tools/ScopeGPT";
 import ScheduleGPT from "./tools/ScheduleGPT";
 import BidMatch from "./tools/BidMatch";
@@ -82,6 +83,15 @@ export default function App() {
     return (
       <Routes>
         <Route path="/approve/:token" element={<Approve />} />
+      </Routes>
+    );
+  }
+
+  // Trade bid pages are publicly accessible (gated by token)
+  if (window.location.pathname.startsWith("/bid/")) {
+    return (
+      <Routes>
+        <Route path="/bid/:token" element={<TradeBid />} />
       </Routes>
     );
   }
