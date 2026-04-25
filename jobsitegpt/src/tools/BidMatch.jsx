@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { callClaude, toBase64 } from "../lib/api";
 import { useToast } from "../lib/hooks";
 import { ProcessingSteps, UploadZone, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
-import { getProjectBidInvitations, getProjectTradeBids } from "../lib/projects";
+import SendToTradesModal from "../components/SendToTradesModal";
+import { getProjectBidInvitations, getProjectTradeBids, getGenerations } from "../lib/projects";
+import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 
 const STEPS = [
   "Uploading bid documents…",
@@ -28,31 +30,134 @@ export default function BidMatch({ activeProject, onProjectChange }) {
   const [toast, showToast] = useToast();
   const [submittedBids, setSubmittedBids] = useState([]); // trade_bids rows
   const [invitations, setInvitations] = useState([]);     // bid_invitations rows
-  const [loadingSubmitted, setLoadingSubmitted] = useState(false);
+  const [loadingProjectData, setLoadingProjectData] = useState(false);
 
-  // Pull invitations + submitted bids for the active project so the GC can
-  // see what's come in through the system without re-uploading anything.
+  // Saved scopes for this project — the source of "what trades can I bid out?"
+  const [scopes, setScopes] = useState([]);
+  const [selectedScopeId, setSelectedScopeId] = useState(null);
+  const [selectedTrades, setSelectedTrades] = useState(new Set()); // tradeName
+
+  // Send-to-trades modal state
+  const [tradesOpen, setTradesOpen] = useState(false);
+  const [tradesScope, setTradesScope] = useState(null); // scope filtered to checked trades
+  const [tradeBranding, setTradeBranding] = useState(null);
+
+  // Pull saved scopes, invitations, and submitted bids for the active project.
   useEffect(() => {
     if (!activeProject?.id) {
       setSubmittedBids([]);
       setInvitations([]);
+      setScopes([]);
+      setSelectedScopeId(null);
+      setSelectedTrades(new Set());
       return;
     }
     let cancelled = false;
-    setLoadingSubmitted(true);
+    setLoadingProjectData(true);
     Promise.all([
       getProjectBidInvitations(activeProject.id),
       getProjectTradeBids(activeProject.id),
+      getGenerations(activeProject.id),
     ])
-      .then(([invs, bids]) => {
+      .then(([invs, bids, gens]) => {
         if (cancelled) return;
         setInvitations(invs);
         setSubmittedBids(bids);
+        const scopeGens = (gens || []).filter((g) => g.tool === "ScopeGPT" && g.result_data?.trades?.length);
+        setScopes(scopeGens);
+        // Auto-select the most recent scope so the GC lands on something useful
+        if (scopeGens.length && !selectedScopeId) {
+          setSelectedScopeId(scopeGens[0].id);
+        }
       })
       .catch(() => {})
-      .finally(() => { if (!cancelled) setLoadingSubmitted(false); });
+      .finally(() => { if (!cancelled) setLoadingProjectData(false); });
     return () => { cancelled = true; };
   }, [activeProject?.id, status]);
+
+  const activeScope = useMemo(
+    () => scopes.find((s) => s.id === selectedScopeId)?.result_data || null,
+    [scopes, selectedScopeId]
+  );
+
+  // When the user changes the scope, reset trade selection
+  useEffect(() => {
+    setSelectedTrades(new Set());
+  }, [selectedScopeId]);
+
+  // Branding for trade emails — load lazily once when the modal first opens
+  useEffect(() => {
+    if (!tradesOpen || tradeBranding) return;
+    let cancelled = false;
+    resolveBranding().then((b) => { if (!cancelled) setTradeBranding(b); });
+    return () => { cancelled = true; };
+  }, [tradesOpen]);
+
+  const toggleTrade = (tradeName) => {
+    setSelectedTrades((prev) => {
+      const next = new Set(prev);
+      if (next.has(tradeName)) next.delete(tradeName);
+      else next.add(tradeName);
+      return next;
+    });
+  };
+  const toggleAllTrades = () => {
+    if (!activeScope) return;
+    setSelectedTrades((prev) =>
+      prev.size === activeScope.trades.length
+        ? new Set()
+        : new Set(activeScope.trades.map((t) => t.tradeName))
+    );
+  };
+
+  const openSendToTrades = () => {
+    if (!activeScope || selectedTrades.size === 0) return;
+    setTradesScope({
+      ...activeScope,
+      trades: activeScope.trades.filter((t) => selectedTrades.has(t.tradeName)),
+    });
+    setTradesOpen(true);
+  };
+
+  const tradeSendHandler = (row) => {
+    const trade = activeScope.trades.find((t) => t.tradeName === row.tradeName);
+    if (!trade) throw new Error("Trade not found in scope");
+    return sendTradeInvitation({
+      scope: activeScope,
+      trade: { ...trade, contractor: row.contractor || trade.contractor },
+      contactName: row.contactName,
+      email: row.email,
+      branding: tradeBranding || {},
+      projectId: activeProject?.id || null,
+      generationId: selectedScopeId,
+    });
+  };
+
+  // Map of tradeName → counts of invites/submitted-bids, used to render
+  // status pills next to each trade in the picker.
+  const tradeStatus = useMemo(() => {
+    const map = new Map();
+    invitations.forEach((i) => {
+      const e = map.get(i.trade_name) || { invited: 0, submitted: 0 };
+      e.invited += 1;
+      if (i.status === "submitted") e.submitted += 1;
+      map.set(i.trade_name, e);
+    });
+    submittedBids.forEach((b) => {
+      const e = map.get(b.trade_name) || { invited: 0, submitted: 0 };
+      // submitted_bids may exist for a trade even if the invitation row count
+      // disagrees — take the larger of the two
+      e.submitted = Math.max(e.submitted, (e.submitted || 0) + 0);
+      map.set(b.trade_name, e);
+    });
+    return map;
+  }, [invitations, submittedBids]);
+
+  const invitedMap = useMemo(() => {
+    const m = new Map();
+    invitations.forEach((i) => m.set(i.trade_name, (m.get(i.trade_name) || 0) + 1));
+    return m;
+  }, [invitations]);
 
   const addBid = () => {
     if (bids.length < 5) setBids((p) => [...p, { name: "", files: [], b64: {} }]);
@@ -166,8 +271,23 @@ export default function BidMatch({ activeProject, onProjectChange }) {
       <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
 
       {(status === "idle" || status === "error") && activeProject?.id && (
+        <BidOutScopePanel
+          loading={loadingProjectData}
+          scopes={scopes}
+          selectedScopeId={selectedScopeId}
+          onSelectScope={setSelectedScopeId}
+          activeScope={activeScope}
+          selectedTrades={selectedTrades}
+          tradeStatus={tradeStatus}
+          onToggleTrade={toggleTrade}
+          onToggleAllTrades={toggleAllTrades}
+          onSendSelected={openSendToTrades}
+        />
+      )}
+
+      {(status === "idle" || status === "error") && activeProject?.id && (
         <SubmittedBidsPanel
-          loading={loadingSubmitted}
+          loading={loadingProjectData}
           invitations={invitations}
           submittedBids={submittedBids}
           onAnalyze={analyzeSubmitted}
@@ -176,6 +296,11 @@ export default function BidMatch({ activeProject, onProjectChange }) {
 
       {(status === "idle" || status === "error") && (
         <>
+          <details style={{ marginTop: 8, marginBottom: 22 }}>
+            <summary style={{ cursor: "pointer", padding: "10px 14px", background: "#f8f9fc", border: "1px solid #e0e4ef", borderRadius: 6, fontFamily: "'Inter',sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#606880" }}>
+              ⬆ Or upload bid PDFs manually
+            </summary>
+            <div style={{ paddingTop: 18 }}>
           <div className="section-label">Project Description</div>
           <div className="input-group">
             <label className="field-label">What are these bids for?</label>
@@ -218,6 +343,8 @@ export default function BidMatch({ activeProject, onProjectChange }) {
           <button className="btn btn-primary btn-lg" disabled={!canGenerate} onClick={generate}>
             ⚖ Analyze Bids
           </button>
+            </div>
+          </details>
         </>
       )}
 
@@ -282,10 +409,153 @@ export default function BidMatch({ activeProject, onProjectChange }) {
         </>
       )}
 
+      <SendToTradesModal
+        isOpen={tradesOpen}
+        onClose={() => setTradesOpen(false)}
+        onSend={tradeSendHandler}
+        scope={tradesScope}
+        alreadyInvited={invitedMap}
+      />
       {toast && <div className="toast">✓ {toast}</div>}
     </div>
   );
 }
+
+// Bid out a scope: pick a saved scope from the project, check trades, send.
+function BidOutScopePanel({
+  loading, scopes, selectedScopeId, onSelectScope, activeScope,
+  selectedTrades, tradeStatus, onToggleTrade, onToggleAllTrades, onSendSelected,
+}) {
+  if (loading && scopes.length === 0) {
+    return (
+      <div style={hubPanelStyle}>
+        <div style={{ fontSize: 12, color: "#909ab0" }}>Loading project scopes…</div>
+      </div>
+    );
+  }
+  if (!scopes.length) {
+    return (
+      <div style={hubPanelStyle}>
+        <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e", marginBottom: 4 }}>📤 Bid Out a Scope</div>
+        <div style={{ fontSize: 12, color: "#606880", lineHeight: 1.6 }}>
+          No saved scopes yet for this project. Generate one in <a href="/scope" style={{ color: "#f0a500", textDecoration: "none" }}>ScopeGPT</a> first — its trade breakdown is what gets bid out.
+        </div>
+      </div>
+    );
+  }
+
+  const allChecked = activeScope && selectedTrades.size === activeScope.trades.length && selectedTrades.size > 0;
+  const noneChecked = selectedTrades.size === 0;
+
+  return (
+    <div style={hubPanelStyle}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e" }}>📤 Bid Out a Scope</div>
+          <div style={{ fontSize: 12, color: "#606880", marginTop: 2 }}>
+            Pick a scope, check the trades you want bids on, send them their scope.
+          </div>
+        </div>
+        <button
+          className="btn btn-primary"
+          disabled={noneChecked}
+          onClick={onSendSelected}
+        >
+          ✉ Send to {selectedTrades.size || "Selected"} Trade{selectedTrades.size === 1 ? "" : "s"}
+        </button>
+      </div>
+
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#606880", marginBottom: 6, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+        Scope
+      </label>
+      <select
+        value={selectedScopeId || ""}
+        onChange={(e) => onSelectScope(e.target.value)}
+        style={{ width: "100%", marginBottom: 16 }}
+      >
+        {scopes.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.title || s.result_data?.projectName || "Untitled scope"} · {s.result_data?.trades?.length || 0} trades · {new Date(s.created_at).toLocaleDateString()}
+          </option>
+        ))}
+      </select>
+
+      {activeScope && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <label style={{ fontSize: 11, fontWeight: 600, color: "#606880", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              Trades ({activeScope.trades.length})
+            </label>
+            <button
+              type="button"
+              onClick={onToggleAllTrades}
+              style={{ background: "none", border: "none", color: "#f0a500", fontSize: 11, cursor: "pointer", padding: 0, fontFamily: "'Inter',sans-serif", fontWeight: 600 }}
+            >
+              {allChecked ? "Deselect all" : "Select all"}
+            </button>
+          </div>
+          <div style={{ border: "1px solid #e0e4ef", borderRadius: 6, background: "#ffffff" }}>
+            {activeScope.trades.map((t, i) => {
+              const status = tradeStatus.get(t.tradeName);
+              const checked = selectedTrades.has(t.tradeName);
+              return (
+                <label
+                  key={i}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "10px 14px",
+                    borderBottom: i < activeScope.trades.length - 1 ? "1px solid #f0f2f5" : "none",
+                    cursor: "pointer", background: checked ? "rgba(240,165,0,0.04)" : "transparent",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggleTrade(t.tradeName)}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1f2e" }}>{t.tradeName}</div>
+                    <div style={{ fontSize: 11, color: "#909ab0", marginTop: 2 }}>
+                      {t.contractor && <>{t.contractor} · </>}{t.lineItems?.length || 0} line items
+                    </div>
+                  </div>
+                  {status && (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {status.invited > 0 && (
+                        <span style={pillStyle("#909ab0", "rgba(144,154,176,0.12)")}>
+                          {status.invited} invited
+                        </span>
+                      )}
+                      {status.submitted > 0 && (
+                        <span style={pillStyle("#27ae60", "rgba(39,174,96,0.1)")}>
+                          {status.submitted} bid{status.submitted === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+const hubPanelStyle = {
+  background: "#ffffff",
+  border: "1.5px solid #e0e4ef",
+  borderTop: "3px solid #f0a500",
+  borderRadius: 8,
+  padding: "18px 20px",
+  marginBottom: 18,
+};
+
+const pillStyle = (color, bg) => ({
+  fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
+  padding: "3px 8px", borderRadius: 10, color, background: bg, whiteSpace: "nowrap",
+});
 
 // Bids that came in via the system, grouped by trade. Shows status pills for
 // invitations that haven't been responded to yet, and a "Compare with AI"

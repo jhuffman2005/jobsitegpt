@@ -84,7 +84,7 @@ export default function SendToTradesModal({
         <div className="modal-header">Send Scope to Trades for Bidding</div>
         {scope?.projectName && <div className="modal-sub">{scope.projectName}</div>}
 
-        <div className="modal-body" style={{ maxHeight: "60vh", overflowY: "auto" }}>
+        <div className="modal-body">
           <div style={{ fontSize: 12, color: "#606880", marginBottom: 14, lineHeight: 1.6 }}>
             Each trade gets a unique link to a page showing only their portion of the scope, where they can enter pricing and submit a bid. Submitted bids show up in BidMatch for side-by-side comparison.
           </div>
