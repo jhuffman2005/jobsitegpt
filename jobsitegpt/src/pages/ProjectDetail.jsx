@@ -177,24 +177,11 @@ export default function ProjectDetail({ onProjectLoad }) {
               Auto-send daily log to client
             </div>
             <div style={{ fontSize: 12, color: "#909ab0", marginTop: 2 }}>
-              When you save a log in SmartLog, it's emailed to the client automatically. A weekly summary is also sent every Friday.
+              Sent to <strong>{form.client_email || "the project Client Email"}</strong> after each log is saved, plus a weekly summary every Friday.
+              {!form.client_email && " Add a Client Email above to enable."}
             </div>
           </div>
         </label>
-        {form.smartlog_auto_send && (
-          <div style={{ marginTop: 14 }}>
-            <label className="field-label">Client Email for SmartLog</label>
-            <input
-              type="email"
-              placeholder="client@email.com"
-              value={form.smartlog_client_email}
-              onChange={e => set("smartlog_client_email", e.target.value)}
-            />
-            <div style={{ fontSize: 11, color: "#909ab0", marginTop: 6 }}>
-              Defaults to the project Client Email if left blank.
-            </div>
-          </div>
-        )}
       </div>
 
       {error && <div className="error-box">{error}</div>}
