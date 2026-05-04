@@ -4,7 +4,7 @@ import {
   getProject, updateProject,
   getProjectFiles, uploadProjectFile,
   deleteProjectFile, getProjectFileUrl,
-  getGenerations,
+  getGenerations, getSmartLogs,
 } from "../lib/projects";
 
 export default function ProjectDetail({ onProjectLoad }) {
@@ -15,6 +15,8 @@ export default function ProjectDetail({ onProjectLoad }) {
   const [files, setFiles] = useState([]);
   const [generations, setGenerations] = useState([]);
   const [expandedGen, setExpandedGen] = useState(null);
+  const [smartLogs, setSmartLogs] = useState([]);
+  const [expandedLog, setExpandedLog] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -23,7 +25,8 @@ export default function ProjectDetail({ onProjectLoad }) {
   const [form, setForm] = useState({
     name: "", client_name: "", client_email: "",
     client_phone: "", address: "", contract_type: "fixed_price",
-    markup_percent: 0, notes: ""
+    markup_percent: 0, notes: "",
+    smartlog_auto_send: false, smartlog_client_email: "",
   });
 
   useEffect(() => { load(); }, [id]);
@@ -31,10 +34,16 @@ export default function ProjectDetail({ onProjectLoad }) {
   const load = async () => {
     try {
       setLoading(true);
-      const [p, f, g] = await Promise.all([getProject(id), getProjectFiles(id), getGenerations(id)]);
+      const [p, f, g, sl] = await Promise.all([
+        getProject(id),
+        getProjectFiles(id),
+        getGenerations(id),
+        getSmartLogs(id).catch(() => []),
+      ]);
       setProject(p);
       setFiles(f);
       setGenerations(g);
+      setSmartLogs(sl);
       setForm({
         name: p.name || "",
         client_name: p.client_name || "",
@@ -44,6 +53,8 @@ export default function ProjectDetail({ onProjectLoad }) {
         contract_type: p.contract_type || "fixed_price",
         markup_percent: p.markup_percent || 0,
         notes: p.notes || "",
+        smartlog_auto_send: !!p.smartlog_auto_send,
+        smartlog_client_email: p.smartlog_client_email || "",
       });
       if (onProjectLoad) onProjectLoad(p);
     } catch (e) { setError(e.message); }
@@ -150,6 +161,40 @@ export default function ProjectDetail({ onProjectLoad }) {
       <div className="input-group">
         <label className="field-label">Project Notes</label>
         <textarea placeholder="Any additional context for this project…" value={form.notes} onChange={e => set("notes", e.target.value)} style={{ minHeight: 80 }} />
+      </div>
+
+      <div className="section-label">SmartLog</div>
+      <div style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "16px 20px", borderRadius: 8, marginBottom: 22 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={!!form.smartlog_auto_send}
+            onChange={e => set("smartlog_auto_send", e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: "#f0a500" }}
+          />
+          <div>
+            <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 600, fontSize: 14, color: "#1a1f2e" }}>
+              Auto-send daily log to client
+            </div>
+            <div style={{ fontSize: 12, color: "#909ab0", marginTop: 2 }}>
+              When you save a log in SmartLog, it's emailed to the client automatically. A weekly summary is also sent every Friday.
+            </div>
+          </div>
+        </label>
+        {form.smartlog_auto_send && (
+          <div style={{ marginTop: 14 }}>
+            <label className="field-label">Client Email for SmartLog</label>
+            <input
+              type="email"
+              placeholder="client@email.com"
+              value={form.smartlog_client_email}
+              onChange={e => set("smartlog_client_email", e.target.value)}
+            />
+            <div style={{ fontSize: 11, color: "#909ab0", marginTop: 6 }}>
+              Defaults to the project Client Email if left blank.
+            </div>
+          </div>
+        )}
       </div>
 
       {error && <div className="error-box">{error}</div>}
@@ -444,6 +489,74 @@ export default function ProjectDetail({ onProjectLoad }) {
         </>
       )}
 
+      {/* SmartLog History */}
+      {smartLogs.length > 0 && (
+        <>
+          <div className="section-label" style={{ marginTop: 32 }}>📓 SmartLog History</div>
+          {smartLogs.map((log) => {
+            const fmtDate = (() => {
+              if (!log.log_date) return "";
+              const [y, m, d] = String(log.log_date).split("-").map(Number);
+              return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+                weekday: "short", month: "short", day: "numeric", year: "numeric",
+              });
+            })();
+            const preview = (log.generated_log || "")
+              .split("\n").filter((l) => l.trim()).slice(0, 2).join(" ").slice(0, 220);
+            const isOpen = expandedLog === log.id;
+            return (
+              <div key={log.id} style={{ background: "#ffffff", border: "1px solid #e0e4ef", borderRadius: 6, marginBottom: 8 }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
+                  onClick={() => setExpandedLog(isOpen ? null : log.id)}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1f2e" }}>{fmtDate}</div>
+                      {log.weather && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "rgba(74,144,226,0.08)", color: "#4a90e2", border: "1px solid rgba(74,144,226,0.2)", fontFamily: "'Inter',sans-serif" }}>
+                          ☀ {log.weather}
+                        </span>
+                      )}
+                      {log.sent_to_client && (
+                        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "rgba(39,174,96,0.08)", color: "#27ae60", border: "1px solid rgba(39,174,96,0.2)", fontFamily: "'Inter',sans-serif" }}>
+                          ✓ Sent
+                        </span>
+                      )}
+                      {log.photos?.length > 0 && (
+                        <span style={{ fontSize: 10, color: "#909ab0", fontFamily: "'Inter',sans-serif" }}>
+                          📷 {log.photos.length}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#606880", lineHeight: 1.5, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                      {preview || "(empty log)"}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 11, color: "#c0c8d8", flexShrink: 0 }}>{isOpen ? "▲" : "▼"}</span>
+                </div>
+                {isOpen && (
+                  <div style={{ padding: "0 16px 16px", borderTop: "1px solid #f0f2f5" }}>
+                    <div style={{ fontSize: 13, color: "#1a1f2e", lineHeight: 1.7, marginTop: 12, whiteSpace: "pre-wrap" }}>
+                      {log.generated_log}
+                    </div>
+                    {log.photos?.length > 0 && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8, marginTop: 14 }}>
+                        {log.photos.map((u) => (
+                          <a key={u} href={u} target="_blank" rel="noopener noreferrer" style={{ display: "block", aspectRatio: "1", borderRadius: 6, overflow: "hidden", border: "1px solid #e0e4ef" }}>
+                            <img src={u} alt="Site photo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+
       {/* Use in Tools */}
       <div className="section-label" style={{ marginTop: 8 }}>Use This Project In</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
@@ -453,6 +566,7 @@ export default function ProjectDetail({ onProjectLoad }) {
           { to: "/bidmatch", label: "BidMatch", icon: "⚖" },
           { to: "/changeorder", label: "ChangeOrderGPT", icon: "✏" },
           { to: "/fieldledger", label: "FieldLedger", icon: "📒" },
+          { to: "/smartlog", label: "SmartLog", icon: "📓" },
         ].map(t => (
           <div key={t.to}
             onClick={() => navigate(t.to)}

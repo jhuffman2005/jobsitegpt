@@ -321,6 +321,67 @@ export async function getTradeBidByInvitation(invitationId) {
   return data;
 }
 
+// ── SmartLog (daily jobsite logs) ─────────────────────────────────────────
+
+export async function uploadSmartLogPhoto(projectId, logDate, file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${projectId}/${logDate}/${Date.now()}_${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from("smartlog-photos")
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (uploadError) throw uploadError;
+  const { data } = supabase.storage.from("smartlog-photos").getPublicUrl(path);
+  return data?.publicUrl || null;
+}
+
+export async function saveSmartLog(fields) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+  const { data, error } = await supabase
+    .from("smart_logs")
+    .insert({ ...fields, user_id: user.id })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSmartLog(id, fields) {
+  const { data, error } = await supabase
+    .from("smart_logs")
+    .update(fields)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getSmartLogs(projectId) {
+  if (!projectId) return [];
+  const { data, error } = await supabase
+    .from("smart_logs")
+    .select("*")
+    .eq("project_id", projectId)
+    .order("log_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getRecentSmartLogs(projectId, limit = 5) {
+  if (!projectId) return [];
+  const { data, error } = await supabase
+    .from("smart_logs")
+    .select("log_date, generated_log")
+    .eq("project_id", projectId)
+    .order("log_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
 // ── User Settings ─────────────────────────────────────────────────────────
 
 export async function saveUserSettings(settings) {

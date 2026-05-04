@@ -36,9 +36,16 @@ const TOOLS = [
     desc: "Log job costs as you go — cash, card, check, whatever. Voice entry, AI cost codes, live reconciliation.",
     flow: ["Log Expenses", "→", "Reconciliation"],
   },
+  {
+    to: "/smartlog",
+    name: "SmartLog",
+    badge: "06",
+    desc: "Snap photos, dictate notes, answer four quick checks → AI writes a professional daily log with weather, optionally emailed to the client.",
+    flow: ["Photos / Notes", "→", "Daily Log"],
+  },
 ];
 
-const WF = ["ScopeGPT", "→", "ScheduleGPT", "→", "BidMatch", "→", "ChangeOrderGPT", "→", "FieldLedger"];
+const WF = ["ScopeGPT", "→", "ScheduleGPT", "→", "BidMatch", "→", "ChangeOrderGPT", "→", "FieldLedger", "→", "SmartLog"];
 
 export default function Dashboard({ user }) {
   const navigate = useNavigate();
@@ -88,7 +95,7 @@ export default function Dashboard({ user }) {
       <div className="tool-grid">
         {TOOLS.map((t) => (
           <div key={t.to} className="tool-card" onClick={() => navigate(t.to)}>
-            <div className="tool-card-num">{t.badge} / 05</div>
+            <div className="tool-card-num">{t.badge} / 06</div>
             <div className="tool-card-name">{t.name}</div>
             <div className="tool-card-desc">{t.desc}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16, fontFamily: "'Inter', sans-serif", fontSize: 11, color: "#c0c8d8" }}>
