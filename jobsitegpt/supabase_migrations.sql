@@ -105,3 +105,39 @@ CREATE TABLE IF NOT EXISTS user_cost_codes (
 ALTER TABLE user_cost_codes ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own cost codes" ON user_cost_codes
   FOR ALL USING (auth.uid() = user_id);
+
+-- 6. SmartLog (daily jobsite logs)
+--    A super uploads photos, dictates notes, answers quick checks → AI writes
+--    a professional log saved per project. Optional auto-send to client.
+CREATE TABLE IF NOT EXISTS smart_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  log_date DATE NOT NULL,
+  raw_notes TEXT,
+  deliveries TEXT,
+  visitors TEXT,
+  safety TEXT,
+  inspections TEXT,
+  weather TEXT,
+  generated_log TEXT,
+  photos TEXT[] DEFAULT '{}',
+  sent_to_client BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS smart_logs_project_idx ON smart_logs(project_id);
+CREATE INDEX IF NOT EXISTS smart_logs_project_date_idx ON smart_logs(project_id, log_date DESC);
+ALTER TABLE smart_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own smart_logs" ON smart_logs
+  FOR ALL USING (auth.uid() = user_id);
+
+-- Add SmartLog settings to projects
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS smartlog_auto_send BOOLEAN DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS smartlog_client_email TEXT;
+
+-- Storage bucket for SmartLog photos.
+-- Run separately in Supabase dashboard (Storage → New bucket):
+--   Name: smartlog-photos
+--   Public: yes  (so client emails can render the photos directly)
+-- Or via SQL:
+--   INSERT INTO storage.buckets (id, name, public) VALUES ('smartlog-photos', 'smartlog-photos', true);

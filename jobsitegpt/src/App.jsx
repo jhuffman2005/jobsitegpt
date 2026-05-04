@@ -16,6 +16,7 @@ import ScheduleGPT from "./tools/ScheduleGPT";
 import BidMatch from "./tools/BidMatch";
 import ChangeOrderGPT from "./tools/ChangeOrderGPT";
 import FieldLedger from "./tools/FieldLedger";
+import SmartLog from "./tools/SmartLog";
 
 function AppShell({ user }) {
   const location = useLocation();
@@ -55,6 +56,7 @@ function AppShell({ user }) {
             <Route path="/bidmatch"     element={<BidMatch {...toolProps} />} />
             <Route path="/changeorder"  element={<ChangeOrderGPT {...toolProps} />} />
             <Route path="/fieldledger"  element={<FieldLedger {...toolProps} />} />
+            <Route path="/smartlog"     element={<SmartLog {...toolProps} />} />
             <Route path="*"             element={<Navigate to="/" replace />} />
           </Routes>
         </div>

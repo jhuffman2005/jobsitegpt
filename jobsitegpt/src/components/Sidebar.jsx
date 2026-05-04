@@ -10,6 +10,7 @@ const NAV = [
   { to: "/bidmatch",    label: "BidMatch",       icon: "⚖" },
   { to: "/changeorder", label: "ChangeOrderGPT", icon: "✏" },
   { to: "/fieldledger", label: "FieldLedger",    icon: "📒" },
+  { to: "/smartlog",    label: "SmartLog",       icon: "📓" },
 ];
 
 export default function Sidebar({ user, activeProject, open, onClose }) {

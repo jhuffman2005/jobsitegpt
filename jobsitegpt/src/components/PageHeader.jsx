@@ -4,11 +4,12 @@ const META = {
   "/":            { badge: "HOME",    title: "Dashboard",      sub: "JobSiteGPT Beta" },
   "/projects":    { badge: "PROJECTS", title: "Projects",      sub: "Manage your jobs" },
   "/settings":    { badge: "SETTINGS", title: "Settings",      sub: "Account & cost codes" },
-  "/scope":       { badge: "01 / 05", title: "ScopeGPT",       sub: "Scope of Work Generator" },
-  "/schedule":    { badge: "02 / 05", title: "ScheduleGPT",    sub: "Project Schedule Generator" },
-  "/bidmatch":    { badge: "03 / 05", title: "BidMatch",       sub: "Bid Leveler & Comparison" },
-  "/changeorder": { badge: "04 / 05", title: "ChangeOrderGPT", sub: "Change Order Writer" },
-  "/fieldledger": { badge: "05 / 05", title: "FieldLedger",    sub: "AI Job Cost Ledger" },
+  "/scope":       { badge: "01 / 06", title: "ScopeGPT",       sub: "Scope of Work Generator" },
+  "/schedule":    { badge: "02 / 06", title: "ScheduleGPT",    sub: "Project Schedule Generator" },
+  "/bidmatch":    { badge: "03 / 06", title: "BidMatch",       sub: "Bid Leveler & Comparison" },
+  "/changeorder": { badge: "04 / 06", title: "ChangeOrderGPT", sub: "Change Order Writer" },
+  "/fieldledger": { badge: "05 / 06", title: "FieldLedger",    sub: "AI Job Cost Ledger" },
+  "/smartlog":    { badge: "06 / 06", title: "SmartLog",       sub: "Daily Jobsite Log" },
 };
 
 export default function PageHeader({ pathname, activeProject, onMenuClick }) {
