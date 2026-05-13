@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
 import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings } from "../lib/projects";
+import { loadLogoAttachment } from "../lib/companyLogo";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -31,15 +32,6 @@ function loadScopeHandoff() {
     sessionStorage.removeItem("jsg_scope_handoff"); // consume once
     return JSON.parse(raw);
   } catch { return null; }
-}
-
-function parseLogoDataUrl(dataUrl) {
-  if (!dataUrl || typeof dataUrl !== "string") return null;
-  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
-  if (!m) return null;
-  const mime = m[1];
-  const ext = (mime.split("/")[1] || "png").split("+")[0];
-  return { mime, base64: m[2], filename: `logo.${ext}` };
 }
 
 // Recompute startDay for any task that has dependencies so it sits exactly on
@@ -423,17 +415,17 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
   const sendToClient = async ({ clientName, clientEmail }) => {
     let companyName = "";
-    let logoDataUrl = "";
+    let logoSource = "";
     try {
       const settings = await getUserSettings();
       companyName = settings?.company_name || "";
-      logoDataUrl = settings?.company_logo || "";
+      logoSource = settings?.company_logo || "";
     } catch {}
 
     const attachments = [];
     let hasLogo = false;
     const logoCid = "company-logo";
-    const parsed = parseLogoDataUrl(logoDataUrl);
+    const parsed = await loadLogoAttachment(logoSource);
     if (parsed) {
       attachments.push({
         filename: parsed.filename,
