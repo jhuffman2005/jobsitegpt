@@ -2,34 +2,26 @@
 // (right after generation) and BidMatch (the primary bidding hub).
 
 import { createBidInvitation, getUserSettings } from "./projects";
+import { loadLogoAttachment } from "./companyLogo";
 
 const esc = (s) => String(s ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-function parseLogoDataUrl(dataUrl) {
-  if (!dataUrl || typeof dataUrl !== "string") return null;
-  const m = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
-  if (!m) return null;
-  const mime = m[1];
-  const ext = (mime.split("/")[1] || "png").split("+")[0];
-  return { mime, base64: m[2], filename: `logo.${ext}` };
-}
-
 // Fetches company branding (name + logo) and shapes it for both the email
 // HTML and the Resend attachments array. Safe to call repeatedly; cheap.
 export async function resolveBranding() {
   let companyName = "";
-  let logoDataUrl = "";
+  let logoSource = "";
   try {
     const settings = await getUserSettings();
     companyName = settings?.company_name || "";
-    logoDataUrl = settings?.company_logo || "";
+    logoSource = settings?.company_logo || "";
   } catch {}
   const attachments = [];
   let hasLogo = false;
   const logoCid = "company-logo";
-  const parsed = parseLogoDataUrl(logoDataUrl);
+  const parsed = await loadLogoAttachment(logoSource);
   if (parsed) {
     attachments.push({
       filename: parsed.filename,

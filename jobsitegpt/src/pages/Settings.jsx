@@ -4,6 +4,7 @@ import {
   getUserCostCodes, saveUserCostCodes,
   getUserSettings, saveUserSettings,
 } from "../lib/projects";
+import { uploadCompanyLogo, deleteCompanyLogo } from "../lib/companyLogo";
 import { useToast } from "../lib/hooks";
 
 const DEFAULT_COST_CODES = [
@@ -14,12 +15,13 @@ const DEFAULT_COST_CODES = [
   "Trim & Finish","Windows & Doors",
 ];
 
-const MAX_LOGO_BYTES = 400 * 1024; // 400 KB — keeps user_metadata comfortably under limits
+const MAX_LOGO_BYTES = 2 * 1024 * 1024; // 2 MB — stored as a file, not in user_metadata
 
 export default function Settings() {
   const [contractorEmail, setContractorEmail] = useState("");
   const [companyName, setCompanyName] = useState("");
-  const [companyLogo, setCompanyLogo] = useState(""); // data URL
+  const [companyLogo, setCompanyLogo] = useState(""); // public storage URL
+  const [logoUploading, setLogoUploading] = useState(false);
   const [codes, setCodes] = useState([]);
   const [newCode, setNewCode] = useState("");
   const [loading, setLoading] = useState(true);
@@ -66,7 +68,7 @@ export default function Settings() {
     }
   };
 
-  const onLogoChange = (e) => {
+  const onLogoChange = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
@@ -75,13 +77,28 @@ export default function Settings() {
       return;
     }
     if (file.size > MAX_LOGO_BYTES) {
-      showToast(`Logo too large — please use an image under ${Math.round(MAX_LOGO_BYTES / 1024)} KB`);
+      showToast(`Logo too large — please use an image under ${Math.round(MAX_LOGO_BYTES / 1024 / 1024)} MB`);
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => setCompanyLogo(ev.target.result);
-    reader.onerror = () => showToast("Could not read image");
-    reader.readAsDataURL(file);
+    setLogoUploading(true);
+    try {
+      const url = await uploadCompanyLogo(file);
+      setCompanyLogo(url);
+    } catch (err) {
+      showToast("Logo upload failed: " + err.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const onLogoRemove = async () => {
+    try {
+      await deleteCompanyLogo();
+    } catch (err) {
+      // Non-fatal — the metadata still gets cleared on save.
+      console.warn("Logo delete from storage failed:", err.message);
+    }
+    setCompanyLogo("");
   };
 
   const addCode = () => {
@@ -184,18 +201,18 @@ export default function Settings() {
               <span style={{ fontSize: 10, color: "#c0c8d8", letterSpacing: "0.08em" }}>NO LOGO</span>
             )}
           </div>
-          <label className="btn" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-            ⬆ {companyLogo ? "Replace" : "Upload"} Logo
-            <input type="file" accept="image/*" style={{ display: "none" }} onChange={onLogoChange} />
+          <label className="btn" style={{ cursor: logoUploading ? "default" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, opacity: logoUploading ? 0.6 : 1 }}>
+            {logoUploading ? "Uploading…" : `⬆ ${companyLogo ? "Replace" : "Upload"} Logo`}
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={onLogoChange} disabled={logoUploading} />
           </label>
-          {companyLogo && (
-            <button type="button" className="btn btn-ghost" onClick={() => setCompanyLogo("")}>
+          {companyLogo && !logoUploading && (
+            <button type="button" className="btn btn-ghost" onClick={onLogoRemove}>
               Remove
             </button>
           )}
         </div>
         <div style={{ fontSize: 11, color: "#909ab0", fontFamily: "'Inter',sans-serif", marginTop: 6 }}>
-          PNG, JPG, or SVG · max {Math.round(MAX_LOGO_BYTES / 1024)} KB · shows in client emails
+          PNG, JPG, or SVG · max {Math.round(MAX_LOGO_BYTES / 1024 / 1024)} MB · shows in client emails
         </div>
       </div>
 

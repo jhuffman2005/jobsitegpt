@@ -185,3 +185,40 @@ CREATE POLICY "Users delete own project files"
     bucket_id = 'project-files'
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- 8. Company Logos (replaces the legacy base64 data: URLs in user_metadata,
+--    which were bloating JWTs past nginx's header limit and breaking storage
+--    uploads with a generic HTML 400). Bucket is public so logos can be
+--    embedded in PDFs / emails without signed URLs. Path layout is
+--    {user_id}/logo.{ext}, so the first folder segment is the ownership gate.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'company-logos',
+  'company-logos',
+  true,
+  2097152,
+  ARRAY['image/png','image/jpeg','image/jpg','image/webp','image/svg+xml','image/gif']
+)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "Users upload own company logo"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'company-logos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+CREATE POLICY "Users update own company logo"
+  ON storage.objects FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'company-logos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+CREATE POLICY "Users delete own company logo"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'company-logos'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+CREATE POLICY "Public read company logos"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'company-logos');
