@@ -222,3 +222,41 @@ CREATE POLICY "Users delete own company logo"
 CREATE POLICY "Public read company logos"
   ON storage.objects FOR SELECT
   USING (bucket_id = 'company-logos');
+
+-- 9. Structured scope/schedule on projects (active source-of-truth).
+--    project_generations stays as the historical record — every AI generation
+--    continues to write a row there. The columns below hold the *active*
+--    scope and schedule for each project; the migration script at
+--    /api/migrate-projects.js promotes the newest generation per tool per
+--    project into these columns one-time.
+--
+--    Shape (see also: scope_trades / scope_notes / schedule_tasks JSDocs in
+--    src/lib/projects.js):
+--      scope_trades:            [{ id, tradeName, contractor, scopeText, origin,
+--                                  lineItems: [{ id, description, note, origin,
+--                                                completed, completed_date,
+--                                                completed_by_log_id }] }]
+--      scope_notes:             { generalConditions: [{id,text,origin,completed,
+--                                                      completed_date,completed_by_log_id}],
+--                                 exclusions:        [...same shape...],
+--                                 clarifications:    [...same shape...] }
+--      schedule_tasks:          [{ id, task, phase, trade, notes,
+--                                  startDay, durationDays,
+--                                  dependencies: [taskUuid],
+--                                  origin, completed,
+--                                  completed_date, completed_by_log_id }]
+--      schedule_phases:         [string]    (phase names — no completion tracking)
+--      schedule_subcontractors: [{ trade, phase, estimatedDays,
+--                                  recommendedSubTypes, scope }]
+--                                          (metadata — no completion tracking)
+--
+--    Note: completed_by_log_id references smart_logs(id). Postgres can't
+--    enforce a real FK through jsonb, so the application clears these refs
+--    when a smart_log row is deleted (see deleteSmartLog in projects.js).
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS scope_trades JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS scope_notes JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS schedule_tasks JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS schedule_phases JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS schedule_subcontractors JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS scope_locked BOOLEAN DEFAULT false;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS schedule_locked BOOLEAN DEFAULT false;
