@@ -321,6 +321,119 @@ export async function getTradeBidByInvitation(invitationId) {
   return data;
 }
 
+// ── Active scope/schedule on projects (structured shape) ────────────────
+// These columns hold the source-of-truth scope/schedule data. Persisted
+// shape is documented in src/lib/structuredData.js. project_generations
+// stays as the historical record — keep using saveGeneration alongside.
+
+export async function getProjectActiveScope(projectId) {
+  if (!projectId) return null;
+  const { data, error } = await supabase
+    .from("projects")
+    .select("scope_trades, scope_notes, scope_locked")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function getProjectActiveSchedule(projectId) {
+  if (!projectId) return null;
+  const { data, error } = await supabase
+    .from("projects")
+    .select("schedule_tasks, schedule_phases, schedule_subcontractors, schedule_locked")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function saveActiveScope(projectId, { scope_trades, scope_notes }) {
+  if (!projectId) return;
+  const { error } = await supabase
+    .from("projects")
+    .update({
+      scope_trades: scope_trades || null,
+      scope_notes: scope_notes || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", projectId);
+  if (error) throw error;
+}
+
+export async function saveActiveSchedule(projectId, { schedule_tasks, schedule_phases, schedule_subcontractors }) {
+  if (!projectId) return;
+  const { error } = await supabase
+    .from("projects")
+    .update({
+      schedule_tasks: schedule_tasks || null,
+      schedule_phases: schedule_phases || null,
+      schedule_subcontractors: schedule_subcontractors || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", projectId);
+  if (error) throw error;
+}
+
+// Application-level approximation of ON DELETE SET NULL for completion refs.
+// Postgres can't enforce FKs through jsonb, so when a SmartLog row is about
+// to be deleted, callers should invoke this first to null out any
+// completed_by_log_id (and completed_date) pointing at it. Walks every
+// project the caller owns; cheap unless the project has thousands of items.
+export async function clearSmartLogReferences(logId) {
+  if (!logId) return;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  // Each section tracks its own "did anything change" flag so we only write
+  // back columns that actually need rewriting.
+  const clearRef = (item, ctx) => {
+    if (item?.completed_by_log_id === logId) {
+      ctx.changed = true;
+      return { ...item, completed_by_log_id: null, completed_date: null };
+    }
+    return item;
+  };
+
+  const { data: projects } = await supabase
+    .from("projects")
+    .select("id, scope_trades, scope_notes, schedule_tasks")
+    .eq("user_id", user.id);
+
+  for (const p of projects || []) {
+    const update = {};
+
+    if (Array.isArray(p.scope_trades)) {
+      const ctx = { changed: false };
+      const next = p.scope_trades.map((t) => ({
+        ...t,
+        lineItems: (t.lineItems || []).map((li) => clearRef(li, ctx)),
+      }));
+      if (ctx.changed) update.scope_trades = next;
+    }
+
+    if (p.scope_notes && typeof p.scope_notes === "object") {
+      const ctx = { changed: false };
+      const nextNotes = {
+        generalConditions: (p.scope_notes.generalConditions || []).map((n) => clearRef(n, ctx)),
+        exclusions:        (p.scope_notes.exclusions        || []).map((n) => clearRef(n, ctx)),
+        clarifications:    (p.scope_notes.clarifications    || []).map((n) => clearRef(n, ctx)),
+      };
+      if (ctx.changed) update.scope_notes = nextNotes;
+    }
+
+    if (Array.isArray(p.schedule_tasks)) {
+      const ctx = { changed: false };
+      const next = p.schedule_tasks.map((t) => clearRef(t, ctx));
+      if (ctx.changed) update.schedule_tasks = next;
+    }
+
+    if (Object.keys(update).length) {
+      await supabase.from("projects").update(update).eq("id", p.id);
+    }
+  }
+}
+
 // ── SmartLog (daily jobsite logs) ─────────────────────────────────────────
 
 export async function uploadSmartLogPhoto(projectId, logDate, file) {

@@ -3,6 +3,7 @@
 
 import { createBidInvitation, getUserSettings } from "./projects";
 import { loadLogoAttachment } from "./companyLogo";
+import { buildLegacyTradeSnapshot } from "./structuredData";
 
 const esc = (s) => String(s ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -35,20 +36,13 @@ export async function resolveBranding() {
   return { companyName, hasLogo, logoCid, attachments };
 }
 
-// A trade's slice of a scope: same shape as the full scope object so the
-// public bid page can render it identically, but trades[] holds only one row.
+// A trade's slice of a scope. The TradeBid page treats this as the immutable
+// record of what was sent to the sub, so it must stay in the LEGACY shape
+// forever — string arrays for sibling notes, plain { description, note }
+// line items, no UUIDs/origins/completion fields. New structured-shape
+// scopes are flattened on the way out so the snapshot format never changes.
 export function buildTradeSnapshot(scope, trade) {
-  return {
-    projectName: scope.projectName,
-    projectType: scope.projectType,
-    projectAddress: scope.projectAddress || null,
-    overview: scope.overview,
-    generalConditions: scope.generalConditions || [],
-    exclusions: scope.exclusions || [],
-    clarifications: scope.clarifications || [],
-    estimatedDuration: scope.estimatedDuration,
-    trades: [trade],
-  };
+  return buildLegacyTradeSnapshot(scope, trade);
 }
 
 export function buildTradeEmailHtml({ scope, trade, contactName, branding, token }) {
