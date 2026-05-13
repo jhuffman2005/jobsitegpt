@@ -141,3 +141,47 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS smartlog_client_email TEXT;
 --   Public: yes  (so client emails can render the photos directly)
 -- Or via SQL:
 --   INSERT INTO storage.buckets (id, name, public) VALUES ('smartlog-photos', 'smartlog-photos', true);
+
+-- 7. Project Files (plans, permits, specs, photos uploaded per project)
+--    Files live in a private "project-files" storage bucket and are accessed
+--    via signed URLs (see getProjectFileUrl in src/lib/projects.js). Storage
+--    path layout is {user_id}/{project_id}/{timestamp}_{filename}, so the
+--    first path segment doubles as the ownership gate for storage RLS.
+CREATE TABLE IF NOT EXISTS project_files (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_type TEXT,
+  file_size BIGINT,
+  storage_path TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS project_files_project_idx ON project_files(project_id);
+ALTER TABLE project_files ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users manage own project files" ON project_files
+  FOR ALL USING (auth.uid() = user_id);
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('project-files', 'project-files', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Storage RLS — first folder segment of the object name is the owning user_id.
+CREATE POLICY "Users upload own project files"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'project-files'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+CREATE POLICY "Users read own project files"
+  ON storage.objects FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'project-files'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
+CREATE POLICY "Users delete own project files"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'project-files'
+    AND (storage.foldername(name))[1] = auth.uid()::text
+  );
