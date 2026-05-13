@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
+import MigrateProjects from "./pages/MigrateProjects";
 import Approve from "./pages/Approve";
 import TradeBid from "./pages/TradeBid";
 import ScopeGPT from "./tools/ScopeGPT";
@@ -51,6 +52,7 @@ function AppShell({ user }) {
             <Route path="/projects"     element={<Projects />} />
             <Route path="/projects/:id" element={<ProjectDetail onProjectLoad={setProject} />} />
             <Route path="/settings"     element={<Settings />} />
+            <Route path="/migrate"      element={<MigrateProjects />} />
             <Route path="/scope"        element={<ScopeGPT {...toolProps} />} />
             <Route path="/schedule"     element={<ScheduleGPT {...toolProps} />} />
             <Route path="/bidmatch"     element={<BidMatch {...toolProps} />} />
