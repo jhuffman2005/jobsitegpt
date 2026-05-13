@@ -2,9 +2,16 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, downloadDoc, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings, getProjectBidInvitations } from "../lib/projects";
+import {
+  getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById,
+  getUserSettings, getProjectBidInvitations,
+  getProjectActiveScope, saveActiveScope,
+} from "../lib/projects";
 import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 import { loadLogoAttachment } from "../lib/companyLogo";
+import {
+  ensureStructuredScope, flattenStructuredScope, makeBlankLineItem, makeBlankNoteItem,
+} from "../lib/structuredData";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -19,9 +26,9 @@ const STEPS = [
 
 const STORAGE_KEY = "jsg_scope_result";
 
-// Restore result from sessionStorage on page load (back button support). The
-// stored blob is tagged with the project it belongs to, so a scope generated
-// under Project A never leaks into Project B.
+// sessionStorage cache for back-button restore. The cached blob is the
+// structured shape (matches what state holds), tagged with the project it
+// belongs to so a scope generated under Project A never leaks into B.
 function loadSavedResult(projectId) {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
@@ -29,9 +36,11 @@ function loadSavedResult(projectId) {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && "data" in parsed) {
       if ((parsed.projectId || null) !== (projectId || null)) return null;
-      return parsed.data;
+      // Tolerate either shape so a session that pre-dates the migration
+      // doesn't poison restore.
+      return ensureStructuredScope(parsed.data);
     }
-    return null; // legacy/untagged blob — ignore
+    return null;
   } catch { return null; }
 }
 
@@ -39,6 +48,48 @@ function persistResult(projectId, data) {
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ projectId: projectId || null, data }));
   } catch {}
+}
+
+// Build a structured result by pulling the active scope columns from the
+// project and overlaying header metadata (projectName, overview, etc.) from
+// the most recent ScopeGPT generation. Returns null if the project has no
+// scope_trades populated AND no generation history — caller treats that as
+// "no scope yet, show the empty form".
+async function loadActiveScope(projectId) {
+  if (!projectId) return null;
+  const active = await getProjectActiveScope(projectId);
+  if (!active?.scope_trades) return null;
+
+  // Header metadata isn't on the active columns; pull from the latest
+  // generation (which is in legacy shape and carries projectName/overview).
+  let meta = {};
+  try {
+    const { supabase } = await import("../lib/supabaseClient");
+    const { data } = await supabase
+      .from("project_generations")
+      .select("result_data")
+      .eq("project_id", projectId)
+      .eq("tool", "ScopeGPT")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data?.result_data) {
+      meta = {
+        projectName: data.result_data.projectName ?? "",
+        projectType: data.result_data.projectType ?? "",
+        projectAddress: data.result_data.projectAddress ?? null,
+        overview: data.result_data.overview ?? "",
+        estimatedDuration: data.result_data.estimatedDuration ?? "",
+      };
+    }
+  } catch {}
+
+  return {
+    ...meta,
+    totalLineItemCount: (active.scope_trades || []).reduce((n, t) => n + (t?.lineItems?.length || 0), 0),
+    scope_trades: active.scope_trades || [],
+    scope_notes: active.scope_notes || { generalConditions: [], exclusions: [], clarifications: [] },
+  };
 }
 
 export default function ScopeGPT({ activeProject, onProjectChange }) {
@@ -50,9 +101,9 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [projectType, setProjectType] = useState("Residential Remodel");
   const [notes, setNotes] = useState("");
   const [specialInstructions, setSpecialInstructions] = useState("");
-  const [status, setStatus] = useState(() => loadSavedResult(activeProject?.id) ? "done" : "idle");
+  const [status, setStatus] = useState("idle");
   const [stepIdx, setStepIdx] = useState(0);
-  const [result, setResult] = useState(() => loadSavedResult(activeProject?.id));
+  const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [toast, showToast] = useToast();
   const [sendOpen, setSendOpen] = useState(false);
@@ -62,40 +113,73 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Project file picker state
-  const [selectedPF, setSelectedPF] = useState([]); // { id, file_name, file_type, storage_path, b64 }
+  const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
 
-  // When the active project changes, try to restore a scope saved for the new
-  // project. If nothing matches (different project, or sessionStorage is empty),
-  // clear the form so no stale data leaks across projects. The initial mount is
-  // a no-op because prevProjectIdRef starts at activeProject?.id.
+  const inHistoryMode = !!historyId;
+
+  // On mount / project change: if we're in history mode, ?historyId hydration
+  // below handles loading. Otherwise try the sessionStorage cache (back
+  // button), then fall back to the project's active scope columns.
   const prevProjectIdRef = useRef(activeProject?.id);
   useEffect(() => {
-    if (historyId) return;
-    if (activeProject?.id === prevProjectIdRef.current) return;
+    if (inHistoryMode) return;
+    const projChanged = activeProject?.id !== prevProjectIdRef.current;
     prevProjectIdRef.current = activeProject?.id;
 
-    const saved = loadSavedResult(activeProject?.id);
-    if (saved) {
-      setResult(saved);
+    if (!projChanged && status !== "idle") return;
+
+    const cached = loadSavedResult(activeProject?.id);
+    if (cached) {
+      setResult(cached);
       setStatus("done");
       setError("");
+      setGenerationId(null);
+      setDirty(false);
       return;
     }
-    setSelectedPF([]);
-    setResult(null);
-    setStatus("idle");
-    setError("");
-    setProjectName("");
-    setNotes("");
-    setSpecialInstructions("");
-    setGenerationId(null);
-    setDirty(false);
-    resetFiles();
-  }, [activeProject?.id]);
 
-  // Hydrate from a saved generation when navigated here with ?historyId=
+    if (!activeProject?.id) {
+      setResult(null);
+      setStatus("idle");
+      setSelectedPF([]);
+      setError("");
+      setGenerationId(null);
+      setDirty(false);
+      resetFiles();
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      const active = await loadActiveScope(activeProject.id);
+      if (cancelled) return;
+      if (active) {
+        setResult(active);
+        setStatus("done");
+        setError("");
+        setGenerationId(null);
+        setDirty(false);
+        persistResult(activeProject.id, active);
+      } else {
+        setSelectedPF([]);
+        setResult(null);
+        setStatus("idle");
+        setError("");
+        setProjectName("");
+        setNotes("");
+        setSpecialInstructions("");
+        setGenerationId(null);
+        setDirty(false);
+        resetFiles();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProject?.id, inHistoryMode]);
+
+  // Hydrate from a saved generation when navigated here with ?historyId=.
+  // Historical rows are stored in legacy shape; normalize to structured for
+  // the editor.
   useEffect(() => {
     if (!historyId) return;
     let cancelled = false;
@@ -103,13 +187,13 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       const g = await getGenerationById(historyId);
       if (cancelled) return;
       if (g?.result_data) {
-        setResult(g.result_data);
+        const structured = ensureStructuredScope(g.result_data);
+        setResult(structured);
         setStatus("done");
         setError("");
         setGenerationId(g.id);
         setDirty(false);
-        // Persist for back-button support, mirroring a freshly-generated result
-        persistResult(g.project_id ?? activeProject?.id, g.result_data);
+        persistResult(g.project_id ?? activeProject?.id, structured);
       }
     })();
     return () => { cancelled = true; };
@@ -146,7 +230,6 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     try {
       const content = [];
 
-      // Project files selected from repository
       selectedPF.forEach((pf) => {
         if (!pf.b64) return;
         if (pf.file_type?.startsWith("image/"))
@@ -155,7 +238,6 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: pf.b64 } });
       });
 
-      // Locally uploaded files
       files.forEach((f) => {
         const data = b64[f.name];
         if (!data) return;
@@ -175,36 +257,43 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       });
 
       timers.forEach(clearTimeout);
-      const r = await callClaude(
+      const legacyResult = await callClaude(
         [{ role: "user", content }],
         "You are an expert GC with 20+ years writing professional scopes of work. Be thorough and complete. Return valid JSON only, no markdown, no explanation, no preamble."
       );
 
-      setResult(r);
+      const structured = ensureStructuredScope(legacyResult);
+      setResult(structured);
       setStatus("done");
+      persistResult(activeProject?.id, structured);
 
-      // Persist for back-button support, tagged with this project's id
-      persistResult(activeProject?.id, r);
-
-      // localStorage history
       const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
       history.unshift({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         projectId: activeProject?.id || null,
         tool: "ScopeGPT",
-        title: r.projectName,
+        title: structured.projectName,
         date: new Date().toISOString(),
-        summary: r.overview,
+        summary: structured.overview,
       });
       localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
 
-      // Supabase history (if project is active)
       setGenerationId(null);
       setDirty(false);
+
+      // Write a new project_generations row (legacy shape, historical record)
+      // AND overwrite the active columns on the project (structured shape).
       if (activeProject?.id) {
-        saveGeneration(activeProject.id, "ScopeGPT", r.projectName, r.overview, r).then((row) => {
-          if (row?.id) setGenerationId(row.id);
-        });
+        saveGeneration(activeProject.id, "ScopeGPT", structured.projectName, structured.overview, legacyResult)
+          .then((row) => { if (row?.id) setGenerationId(row.id); });
+        try {
+          await saveActiveScope(activeProject.id, {
+            scope_trades: structured.scope_trades,
+            scope_notes: structured.scope_notes,
+          });
+        } catch (e) {
+          console.warn("Active scope save failed:", e.message);
+        }
       }
     } catch (e) {
       timers.forEach(clearTimeout);
@@ -227,25 +316,32 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   };
 
   const goToSchedule = () => {
-    sessionStorage.setItem("jsg_scope_handoff", JSON.stringify(result));
+    // Schedule handoff expects a parseable scope; pass the legacy shape since
+    // ScheduleGPT's prompt instructs Claude to parse the legacy fields.
+    sessionStorage.setItem("jsg_scope_handoff", JSON.stringify(flattenStructuredScope(result)));
     navigate("/schedule");
   };
 
   const toText = (r) => {
     const lines = [`SCOPE OF WORK\n=============\nProject: ${r.projectName}\nType: ${r.projectType}\nDuration: ${r.estimatedDuration}\n\nOVERVIEW\n--------\n${r.overview}\n`];
-    r.trades.forEach((t, i) => {
+    (r.scope_trades || []).forEach((t, i) => {
       lines.push(`${i + 1}. ${t.tradeName.toUpperCase()} [${t.contractor}]\n   ${t.scopeText}`);
-      t.lineItems.forEach((li) => lines.push(`   • ${li.description}${li.note ? ` (${li.note})` : ""}`));
+      (t.lineItems || []).forEach((li) => lines.push(`   • ${li.description}${li.note ? ` (${li.note})` : ""}`));
       lines.push("");
     });
-    if (r.generalConditions?.length) { lines.push("GENERAL CONDITIONS\n------------------"); r.generalConditions.forEach((g) => lines.push(`• ${g}`)); lines.push(""); }
-    if (r.exclusions?.length) { lines.push("EXCLUSIONS\n----------"); r.exclusions.forEach((e) => lines.push(`• ${e}`)); lines.push(""); }
-    if (r.clarifications?.length) { lines.push("CLARIFICATIONS\n--------------"); r.clarifications.forEach((c) => lines.push(`• ${c}`)); }
+    const noteText = (arr) => (arr || []).map((n) => n.text);
+    const gc = noteText(r.scope_notes?.generalConditions);
+    const ex = noteText(r.scope_notes?.exclusions);
+    const cl = noteText(r.scope_notes?.clarifications);
+    if (gc.length) { lines.push("GENERAL CONDITIONS\n------------------"); gc.forEach((g) => lines.push(`• ${g}`)); lines.push(""); }
+    if (ex.length) { lines.push("EXCLUSIONS\n----------"); ex.forEach((e) => lines.push(`• ${e}`)); lines.push(""); }
+    if (cl.length) { lines.push("CLARIFICATIONS\n--------------"); cl.forEach((c) => lines.push(`• ${c}`)); }
     return lines.join("\n");
   };
 
-  // Persisting edits: update result and mirror to sessionStorage (tagged with
-  // the current project so it never leaks into a different project's view).
+  // updateResult: persists locally and routes the save by mode. Active mode
+  // writes structured to projects.scope_*; history mode writes legacy back
+  // to project_generations (existing behavior).
   const updateResult = (updater) => {
     setResult((prev) => {
       if (!prev) return prev;
@@ -256,19 +352,34 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     setDirty(true);
   };
 
+  const persistCurrent = async (current) => {
+    if (inHistoryMode && generationId) {
+      await updateGeneration(generationId, {
+        title: current.projectName,
+        summary: current.overview,
+        result_data: flattenStructuredScope(current),
+      });
+    } else if (activeProject?.id) {
+      await saveActiveScope(activeProject.id, {
+        scope_trades: current.scope_trades,
+        scope_notes: current.scope_notes,
+      });
+    }
+  };
+
   const saveChanges = async () => {
     if (!result) return;
-    if (!generationId) {
-      showToast("No saved scope to update — select or generate one under a project");
+    if (!inHistoryMode && !activeProject?.id) {
+      showToast("Select a project before saving");
+      return;
+    }
+    if (inHistoryMode && !generationId) {
+      showToast("No saved scope to update");
       return;
     }
     setSaving(true);
     try {
-      await updateGeneration(generationId, {
-        title: result.projectName,
-        summary: result.overview,
-        result_data: result,
-      });
+      await persistCurrent(result);
       setDirty(false);
       showToast("Changes saved!");
     } catch (e) {
@@ -278,18 +389,14 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     }
   };
 
-  // Auto-save edits back to Supabase so navigating away via history links
-  // shows the edited version. Debounced to avoid a request per keystroke.
   useEffect(() => {
-    if (!dirty || !generationId || !result) return;
+    if (!dirty || !result) return;
+    if (inHistoryMode && !generationId) return;
+    if (!inHistoryMode && !activeProject?.id) return;
     const timer = setTimeout(async () => {
       setSaving(true);
       try {
-        await updateGeneration(generationId, {
-          title: result.projectName,
-          summary: result.overview,
-          result_data: result,
-        });
+        await persistCurrent(result);
         setDirty(false);
       } catch (e) {
         console.warn("Auto-save failed:", e.message);
@@ -298,27 +405,59 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       }
     }, 1200);
     return () => clearTimeout(timer);
-  }, [dirty, generationId, result]);
+  }, [dirty, generationId, result, inHistoryMode, activeProject?.id]);
+
   const updateTrade = (tradeId, field, value) =>
-    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId ? { ...t, [field]: value } : t) }));
-  const updateLineItem = (tradeId, idx, field, value) =>
-    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId
-      ? { ...t, lineItems: t.lineItems.map((li, i) => i === idx ? { ...li, [field]: value } : li) }
-      : t) }));
-  const deleteLineItem = (tradeId, idx) =>
-    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId
-      ? { ...t, lineItems: t.lineItems.filter((_, i) => i !== idx) }
-      : t) }));
+    updateResult((r) => ({
+      ...r,
+      scope_trades: r.scope_trades.map((t) => t.id === tradeId ? { ...t, [field]: value } : t),
+    }));
+  const updateLineItem = (tradeId, lineItemId, field, value) =>
+    updateResult((r) => ({
+      ...r,
+      scope_trades: r.scope_trades.map((t) => t.id === tradeId
+        ? { ...t, lineItems: t.lineItems.map((li) => li.id === lineItemId ? { ...li, [field]: value } : li) }
+        : t),
+    }));
+  const deleteLineItem = (tradeId, lineItemId) =>
+    updateResult((r) => ({
+      ...r,
+      scope_trades: r.scope_trades.map((t) => t.id === tradeId
+        ? { ...t, lineItems: t.lineItems.filter((li) => li.id !== lineItemId) }
+        : t),
+    }));
   const addLineItem = (tradeId) =>
-    updateResult((r) => ({ ...r, trades: r.trades.map((t) => t.id === tradeId
-      ? { ...t, lineItems: [...(t.lineItems || []), { description: "", note: null }] }
-      : t) }));
-  const updateNote = (field, idx, value) =>
-    updateResult((r) => ({ ...r, [field]: (r[field] || []).map((x, i) => i === idx ? value : x) }));
-  const deleteNote = (field, idx) =>
-    updateResult((r) => ({ ...r, [field]: (r[field] || []).filter((_, i) => i !== idx) }));
+    updateResult((r) => ({
+      ...r,
+      scope_trades: r.scope_trades.map((t) => t.id === tradeId
+        ? { ...t, lineItems: [...(t.lineItems || []), makeBlankLineItem("user_added")] }
+        : t),
+    }));
+
+  const updateNote = (field, itemId, value) =>
+    updateResult((r) => ({
+      ...r,
+      scope_notes: {
+        ...r.scope_notes,
+        [field]: (r.scope_notes?.[field] || []).map((x) => x.id === itemId ? { ...x, text: value } : x),
+      },
+    }));
+  const deleteNote = (field, itemId) =>
+    updateResult((r) => ({
+      ...r,
+      scope_notes: {
+        ...r.scope_notes,
+        [field]: (r.scope_notes?.[field] || []).filter((x) => x.id !== itemId),
+      },
+    }));
   const addNote = (field) =>
-    updateResult((r) => ({ ...r, [field]: [...(r[field] || []), ""] }));
+    updateResult((r) => ({
+      ...r,
+      scope_notes: {
+        ...r.scope_notes,
+        [field]: [...(r.scope_notes?.[field] || []), makeBlankNoteItem("user_added")],
+      },
+    }));
   const updateOverview = (value) => updateResult((r) => ({ ...r, overview: value }));
 
   const esc = (s) => String(s ?? "")
@@ -326,7 +465,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
   const toWordHtml = (r) => {
-    const tradeBlocks = r.trades.map((t, i) => `
+    const noteTexts = (arr) => (arr || []).map((n) => n.text);
+    const tradeBlocks = (r.scope_trades || []).map((t, i) => `
       <h2 style="font-size:14pt;color:#1a1f2e;margin:18pt 0 4pt;border-bottom:1pt solid #d0d4dc;padding-bottom:3pt;">${i + 1}. ${esc(t.tradeName)} <span style="font-size:10pt;color:#c47f00;font-weight:normal;">[${esc(t.contractor)}]</span></h2>
       <p style="margin:6pt 0;">${esc(t.scopeText)}</p>
       ${t.lineItems?.length ? `<ul style="margin:6pt 0 6pt 24pt;">${t.lineItems.map((li) => `<li style="margin-bottom:3pt;">${esc(li.description)}${li.note ? ` <i style="color:#606880;">— ${esc(li.note)}</i>` : ""}</li>`).join("")}</ul>` : ""}`).join("");
@@ -344,9 +484,9 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       <p style="margin:6pt 0;">${esc(r.overview)}</p>
       <h2 style="font-size:13pt;color:#1a1f2e;margin:18pt 0 6pt;border-bottom:1pt solid #d0d4dc;padding-bottom:3pt;">Scope by Trade</h2>
       ${tradeBlocks}
-      ${listSection("General Conditions", r.generalConditions)}
-      ${listSection("Exclusions", r.exclusions)}
-      ${listSection("Clarifications", r.clarifications)}`;
+      ${listSection("General Conditions", noteTexts(r.scope_notes?.generalConditions))}
+      ${listSection("Exclusions", noteTexts(r.scope_notes?.exclusions))}
+      ${listSection("Clarifications", noteTexts(r.scope_notes?.clarifications))}`;
   };
 
   const downloadWord = () => {
@@ -356,7 +496,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
   const toEmailHtml = (r, clientName, branding = {}) => {
     const { hasLogo, logoCid, companyName } = branding;
-    const tradeBlocks = r.trades.map((t, i) => `
+    const noteTexts = (arr) => (arr || []).map((n) => n.text);
+    const tradeBlocks = (r.scope_trades || []).map((t, i) => `
       <div style="margin:0 0 22px;padding:16px 18px;background:#f8f9fc;border:1px solid #e0e4ef;border-radius:8px;">
         <div style="font-size:11px;letter-spacing:0.08em;color:#909ab0;text-transform:uppercase;margin-bottom:4px;">Trade #${String(i + 1).padStart(2, "0")} · ${esc(t.contractor)}</div>
         <div style="font-weight:700;font-size:16px;color:#1a1f2e;margin-bottom:8px;">${esc(t.tradeName)}</div>
@@ -391,9 +532,9 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           <div style="font-size:14px;line-height:1.65;color:#1a1f2e;margin-bottom:18px;">${esc(r.overview)}</div>
           <h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:24px 0 10px;">Scope by Trade</h3>
           ${tradeBlocks}
-          ${listSection("General Conditions", r.generalConditions)}
-          ${listSection("Exclusions", r.exclusions)}
-          ${listSection("Clarifications", r.clarifications)}
+          ${listSection("General Conditions", noteTexts(r.scope_notes?.generalConditions))}
+          ${listSection("Exclusions", noteTexts(r.scope_notes?.exclusions))}
+          ${listSection("Clarifications", noteTexts(r.scope_notes?.clarifications))}
           <div style="margin-top:28px;padding-top:16px;border-top:1px solid #f0f2f5;font-size:11px;color:#909ab0;">Sent by ${footerSender} via JobSiteGPT</div>
         </div>
       </div>
@@ -456,8 +597,6 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     setTradesOpen(true);
   };
 
-  // Branding (logo + company name) loaded once when the modal opens, then
-  // closed over by the per-row send so each email reuses it.
   const [tradeBranding, setTradeBranding] = useState(null);
   useEffect(() => {
     if (!tradesOpen) { setTradeBranding(null); return; }
@@ -465,11 +604,17 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     resolveBranding().then((b) => { if (!cancelled) setTradeBranding(b); });
     return () => { cancelled = true; };
   }, [tradesOpen]);
+
+  // The modal expects legacy shape (it has been around since before this
+  // migration and reads scope.trades). We flatten here so the modal stays
+  // shape-agnostic.
+  const flatScopeForModal = result ? flattenStructuredScope(result) : null;
+
   const tradeSendHandler = (row) => {
-    const trade = result.trades.find((t) => t.tradeName === row.tradeName);
+    const trade = (result.scope_trades || []).find((t) => t.tradeName === row.tradeName);
     if (!trade) throw new Error("Trade not found in scope");
     return sendTradeInvitation({
-      scope: result,
+      scope: result, // structured — buildLegacyTradeSnapshot flattens internally
       trade: { ...trade, contractor: row.contractor || trade.contractor },
       contactName: row.contactName,
       email: row.email,
@@ -544,29 +689,26 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           <div className="result-header-card">
             <div className="result-title">{result.projectName}</div>
             <div className="result-meta">
-              {result.projectType}{result.projectAddress ? ` · ${result.projectAddress}` : ""} · {result.estimatedDuration} · {result.totalLineItemCount} line items / {result.trades.length} trades
+              {result.projectType}{result.projectAddress ? ` · ${result.projectAddress}` : ""} · {result.estimatedDuration} · {(result.scope_trades || []).reduce((n, t) => n + (t.lineItems?.length || 0), 0)} line items / {(result.scope_trades || []).length} trades
             </div>
             <div className="result-actions">
               <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
               <button className="btn" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ .txt</button>
               <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>⧉ Copy</button>
-              {generationId && (
-                <button
-                  className="btn"
-                  style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
-                  disabled={saving || !dirty}
-                  onClick={saveChanges}
-                >
-                  {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
-                </button>
-              )}
+              <button
+                className="btn"
+                style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
+                disabled={saving || !dirty}
+                onClick={saveChanges}
+              >
+                {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
+              </button>
               <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
-              <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
+              <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.scope_trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
               <button className="btn btn-ghost" onClick={reset}>↩ New Scope</button>
             </div>
           </div>
 
-          {/* Schedule handoff — direct navigation, no JSON export required */}
           <div className="handoff-banner">
             <div style={{ fontSize: 22 }}>📅</div>
             <div style={{ flex: 1 }}>
@@ -583,10 +725,10 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           </div>
 
           <div className="section-label">Scope by Trade</div>
-          {result.trades.map((t) => (
+          {(result.scope_trades || []).map((t, idx) => (
             <div key={t.id} className="trade-block">
               <div className="trade-header">
-                <span className="trade-num">#{String(t.id).padStart(2, "0")}</span>
+                <span className="trade-num">#{String(idx + 1).padStart(2, "0")}</span>
                 <input
                   className="edit-input"
                   style={{ flex: 1, fontWeight: 700, fontSize: 16, letterSpacing: "0.04em", color: "#1a1f2e" }}
@@ -608,22 +750,22 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                   onChange={(e) => updateTrade(t.id, "scopeText", e.target.value)}
                 />
                 <div className="line-items">
-                  {t.lineItems.map((li, i) => (
-                    <div key={i} className="line-item editable-row">
+                  {(t.lineItems || []).map((li) => (
+                    <div key={li.id} className="line-item editable-row">
                       <span className="line-bullet">▸</span>
                       <div className="edit-body">
                         <input
                           className="edit-input"
                           style={{ fontSize: 13 }}
                           value={li.description}
-                          onChange={(e) => updateLineItem(t.id, i, "description", e.target.value)}
+                          onChange={(e) => updateLineItem(t.id, li.id, "description", e.target.value)}
                           placeholder="Line item description"
                         />
                         <input
                           className="edit-input"
                           style={{ fontSize: 11, fontStyle: "italic", color: "#909ab0" }}
                           value={li.note || ""}
-                          onChange={(e) => updateLineItem(t.id, i, "note", e.target.value || null)}
+                          onChange={(e) => updateLineItem(t.id, li.id, "note", e.target.value || null)}
                           placeholder="Optional note"
                         />
                       </div>
@@ -631,7 +773,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                         type="button"
                         className="delete-icon-btn"
                         title="Delete line"
-                        onClick={() => deleteLineItem(t.id, i)}
+                        onClick={() => deleteLineItem(t.id, li.id)}
                       >🗑</button>
                     </div>
                   ))}
@@ -641,15 +783,15 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
             </div>
           ))}
 
-          {renderNotesSection("General Conditions", "generalConditions", result.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
-          {renderNotesSection("Exclusions", "exclusions", result.exclusions, { updateNote, deleteNote, addNote })}
-          {renderNotesSection("Clarifications", "clarifications", result.clarifications, { updateNote, deleteNote, addNote })}
+          {renderNotesSection("General Conditions", "generalConditions", result.scope_notes?.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
+          {renderNotesSection("Exclusions", "exclusions", result.scope_notes?.exclusions, { updateNote, deleteNote, addNote })}
+          {renderNotesSection("Clarifications", "clarifications", result.scope_notes?.clarifications, { updateNote, deleteNote, addNote })}
 
           <div className="result-actions" style={{ marginTop: 24 }}>
             <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
             <button className="btn" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ .txt</button>
             <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
-            <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
+            <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.scope_trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
             <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={goToSchedule}>📅 Open in ScheduleGPT</button>
             <button className="btn btn-ghost" onClick={reset}>↩ Start Over</button>
           </div>
@@ -667,7 +809,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         isOpen={tradesOpen}
         onClose={() => setTradesOpen(false)}
         onSend={tradeSendHandler}
-        scope={result}
+        scope={flatScopeForModal}
         alreadyInvited={invitedMap}
       />
       {toast && <div className="toast">✓ {toast}</div>}
@@ -683,13 +825,13 @@ function renderNotesSection(title, field, items, helpers) {
       <div className="section-label" style={topMargin ? { marginTop: topMargin } : undefined}>{title}</div>
       <div className="notes-block">
         <div className="notes-list">
-          {list.map((val, i) => (
-            <div key={i} className="notes-item editable-row" style={{ display: "flex" }}>
+          {list.map((item) => (
+            <div key={item.id} className="notes-item editable-row" style={{ display: "flex" }}>
               <div className="edit-body" style={{ flex: 1 }}>
                 <input
                   className="edit-input"
-                  value={val}
-                  onChange={(e) => updateNote(field, i, e.target.value)}
+                  value={item.text}
+                  onChange={(e) => updateNote(field, item.id, e.target.value)}
                   placeholder={`${title.slice(0, -1)}…`}
                 />
               </div>
@@ -697,7 +839,7 @@ function renderNotesSection(title, field, items, helpers) {
                 type="button"
                 className="delete-icon-btn"
                 title="Delete"
-                onClick={() => deleteNote(field, i)}
+                onClick={() => deleteNote(field, item.id)}
               >🗑</button>
             </div>
           ))}

@@ -2,8 +2,15 @@ import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
-import { getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById, getUserSettings } from "../lib/projects";
+import {
+  getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById,
+  getUserSettings,
+  getProjectActiveSchedule, saveActiveSchedule,
+} from "../lib/projects";
 import { loadLogoAttachment } from "../lib/companyLogo";
+import {
+  ensureStructuredSchedule, flattenStructuredSchedule, buildScheduleOrdinalMaps, makeBlankTask,
+} from "../lib/structuredData";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -24,21 +31,19 @@ const PHASE_COLORS = [
   { bg: "rgba(16,185,129,0.1)",  color: "#10b981" },
 ];
 
-// Load scope handoff from ScopeGPT if present
 function loadScopeHandoff() {
   try {
     const raw = sessionStorage.getItem("jsg_scope_handoff");
     if (!raw) return null;
-    sessionStorage.removeItem("jsg_scope_handoff"); // consume once
+    sessionStorage.removeItem("jsg_scope_handoff");
     return JSON.parse(raw);
   } catch { return null; }
 }
 
-// Recompute startDay for any task that has dependencies so it sits exactly on
-// the earliest day after its predecessors finish. Tasks without dependencies
-// keep whatever startDay the user typed. This runs in both directions — if a
-// predecessor's duration shrinks, downstream tasks pull back. Safe against
-// missing or circular dependency edges via an iteration cap.
+// Recompute startDay for any task that has dependencies so it sits exactly
+// on the earliest day after its predecessors finish. Tasks without deps keep
+// whatever startDay the user typed. Safe against missing or circular edges
+// via an iteration cap. Works on UUID-keyed tasks (structured shape).
 function cascadeSchedule(tasks) {
   const next = tasks.map((t) => ({
     ...t,
@@ -51,12 +56,12 @@ function cascadeSchedule(tasks) {
   for (let i = 0; i < maxIter; i++) {
     let changed = false;
     for (const t of next) {
-      if (t.dependencies.length === 0) continue; // root task — user-controlled
+      if (t.dependencies.length === 0) continue;
       let earliest = null;
       for (const dep of t.dependencies) {
         const d = byId.get(String(dep));
         if (!d) continue;
-        const finish = d.startDay + d.durationDays; // first free day after dep
+        const finish = d.startDay + d.durationDays;
         if (earliest === null || finish > earliest) earliest = finish;
       }
       if (earliest !== null && t.startDay !== earliest) {
@@ -76,6 +81,21 @@ function computeTotalDays(tasks) {
   }, 0);
 }
 
+// Build a runtime structured result by pulling the active schedule columns
+// from the project. Returns null when there's no schedule yet.
+async function loadActiveSchedule(projectId) {
+  if (!projectId) return null;
+  const active = await getProjectActiveSchedule(projectId);
+  if (!active?.schedule_tasks) return null;
+  return {
+    projectName: "",
+    totalDays: computeTotalDays(active.schedule_tasks || []),
+    schedule_tasks: active.schedule_tasks || [],
+    schedule_phases: active.schedule_phases || [],
+    schedule_subcontractors: active.schedule_subcontractors || [],
+  };
+}
+
 export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const historyId = searchParams.get("historyId");
@@ -92,13 +112,13 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [generationId, setGenerationId] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [scopeHandoff, setScopeHandoff] = useState(null); // scope data passed from ScopeGPT
+  const [scopeHandoff, setScopeHandoff] = useState(null);
 
-  // Project file picker state
   const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
 
-  // Check for scope handoff on mount
+  const inHistoryMode = !!historyId;
+
   useEffect(() => {
     const handoff = loadScopeHandoff();
     if (handoff) {
@@ -107,12 +127,40 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     }
   }, []);
 
-  // Clear project file selection when project changes
+  // Active-mode load: pull from projects.schedule_* when a project is active
+  // and we're not in history mode.
   useEffect(() => {
+    if (inHistoryMode) return;
     setSelectedPF([]);
-  }, [activeProject?.id]);
+    if (!activeProject?.id) {
+      setResult(null);
+      setStatus("idle");
+      setGenerationId(null);
+      setDirty(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const active = await loadActiveSchedule(activeProject.id);
+      if (cancelled) return;
+      if (active) {
+        // Fill projectName from project record since the column doesn't carry it
+        active.projectName = activeProject.name || "";
+        setResult(active);
+        setStatus("done");
+        setGenerationId(null);
+        setDirty(false);
+      } else {
+        setResult(null);
+        setStatus("idle");
+        setGenerationId(null);
+        setDirty(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeProject?.id, inHistoryMode]);
 
-  // Hydrate from a saved generation when navigated here with ?historyId=
+  // Hydrate from a saved generation when navigated here with ?historyId=.
   useEffect(() => {
     if (!historyId) return;
     let cancelled = false;
@@ -120,7 +168,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
       const g = await getGenerationById(historyId);
       if (cancelled) return;
       if (g?.result_data) {
-        setResult(g.result_data);
+        const structured = ensureStructuredSchedule(g.result_data);
+        setResult(structured);
         setStatus("done");
         setError("");
         setGenerationId(g.id);
@@ -161,12 +210,10 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     try {
       const content = [];
 
-      // Scope handoff from ScopeGPT (highest priority context)
       if (scopeHandoff) {
         content.push({ type: "text", text: `ScopeGPT Output (use this as the authoritative scope):\n${JSON.stringify(scopeHandoff)}` });
       }
 
-      // Project files selected from repository
       selectedPF.forEach((pf) => {
         if (!pf.b64) return;
         if (pf.file_type?.startsWith("image/"))
@@ -175,7 +222,6 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
           content.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: pf.b64 } });
       });
 
-      // Locally uploaded files
       files.forEach((f) => {
         const data = b64[f.name];
         if (!data) return;
@@ -199,37 +245,44 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
       });
 
       timers.forEach(clearTimeout);
-      const r = await callClaude(
+      const legacyResult = await callClaude(
         [{ role: "user", content }],
         `You are an expert construction scheduler. ${projectType === "remodel" ? "Focus on interior trades; only include exterior if documents explicitly call for them." : "Include full sequence: site work, excavation, foundation, framing, exterior, MEP, finishes."} Return valid JSON only, no markdown.`
       );
 
-      setResult(r);
+      const structured = ensureStructuredSchedule(legacyResult);
+      setResult(structured);
       setStatus("done");
 
-      // localStorage history
       const history = JSON.parse(localStorage.getItem("jsg_history") || "[]");
       history.unshift({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         projectId: activeProject?.id || null,
         tool: "ScheduleGPT",
-        title: r.projectName,
+        title: structured.projectName,
         date: new Date().toISOString(),
-        summary: `${r.tasks.length} tasks across ${r.phases.length} phases · ${r.totalDays} days`,
+        summary: `${structured.schedule_tasks.length} tasks across ${structured.schedule_phases.length} phases · ${structured.totalDays} days`,
       });
       localStorage.setItem("jsg_history", JSON.stringify(history.slice(0, 100)));
 
-      // Supabase history
       setGenerationId(null);
       setDirty(false);
+
       if (activeProject?.id) {
         saveGeneration(
-          activeProject.id, "ScheduleGPT", r.projectName,
-          `${r.tasks.length} tasks · ${r.phases.length} phases · ${r.totalDays} days`,
-          r
-        ).then((row) => {
-          if (row?.id) setGenerationId(row.id);
-        });
+          activeProject.id, "ScheduleGPT", structured.projectName,
+          `${structured.schedule_tasks.length} tasks · ${structured.schedule_phases.length} phases · ${structured.totalDays} days`,
+          legacyResult
+        ).then((row) => { if (row?.id) setGenerationId(row.id); });
+        try {
+          await saveActiveSchedule(activeProject.id, {
+            schedule_tasks: structured.schedule_tasks,
+            schedule_phases: structured.schedule_phases,
+            schedule_subcontractors: structured.schedule_subcontractors,
+          });
+        } catch (e) {
+          console.warn("Active schedule save failed:", e.message);
+        }
       }
     } catch (e) {
       timers.forEach(clearTimeout);
@@ -252,17 +305,27 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   };
 
   const phaseMap = {};
-  if (result) result.phases.forEach((p, i) => { phaseMap[p] = PHASE_COLORS[i % PHASE_COLORS.length]; });
+  if (result) (result.schedule_phases || []).forEach((p, i) => { phaseMap[p] = PHASE_COLORS[i % PHASE_COLORS.length]; });
+
+  // Dependency UI keeps the legacy "type 1, 2" UX while storage uses UUIDs.
+  // The ordinal maps below convert in both directions at render/input time.
+  const { idToOrdinal, ordinalToId } = result
+    ? buildScheduleOrdinalMaps(result.schedule_tasks || [])
+    : { idToOrdinal: new Map(), ordinalToId: new Map() };
 
   const exportTSV = () => {
     if (!result) return;
     const lines = [`PROJECT SCHEDULE — ${result.projectName}\n`];
     lines.push("TASK SCHEDULE");
     lines.push(["#","Task","Phase","Trade","Start Day","Duration","Dependencies","Notes"].join("\t"));
-    result.tasks.forEach((t) => lines.push([t.id, t.task, t.phase, t.trade, `Day ${t.startDay}`, `${t.durationDays}d`, (t.dependencies || []).join(",") || "—", t.notes || ""].join("\t")));
+    (result.schedule_tasks || []).forEach((t, idx) => lines.push([
+      idx + 1, t.task, t.phase, t.trade, `Day ${t.startDay}`, `${t.durationDays}d`,
+      (t.dependencies || []).map((d) => idToOrdinal.get(d)).filter(Boolean).join(",") || "—",
+      t.notes || "",
+    ].join("\t")));
     lines.push(`\nSUBCONTRACTOR WORKSHEET`);
     lines.push(["Trade","Phase","Est. Days","Sub Types","Scope"].join("\t"));
-    result.subcontractors.forEach((s) => lines.push([s.trade, s.phase, s.estimatedDays, (s.recommendedSubTypes || []).join(", "), s.scope].join("\t")));
+    (result.schedule_subcontractors || []).forEach((s) => lines.push([s.trade, s.phase, s.estimatedDays, (s.recommendedSubTypes || []).join(", "), s.scope].join("\t")));
     downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Schedule.tsv`, lines.join("\n"));
     showToast("Downloaded!");
   };
@@ -272,19 +335,35 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     setDirty(true);
   };
 
+  const persistCurrent = async (current) => {
+    if (inHistoryMode && generationId) {
+      await updateGeneration(generationId, {
+        title: current.projectName,
+        summary: `${current.schedule_tasks.length} tasks · ${current.schedule_phases.length} phases · ${current.totalDays} days`,
+        result_data: flattenStructuredSchedule(current),
+      });
+    } else if (activeProject?.id) {
+      await saveActiveSchedule(activeProject.id, {
+        schedule_tasks: current.schedule_tasks,
+        schedule_phases: current.schedule_phases,
+        schedule_subcontractors: current.schedule_subcontractors,
+      });
+    }
+  };
+
   const saveChanges = async () => {
     if (!result) return;
-    if (!generationId) {
-      showToast("No saved schedule to update — select or generate one under a project");
+    if (!inHistoryMode && !activeProject?.id) {
+      showToast("Select a project before saving");
+      return;
+    }
+    if (inHistoryMode && !generationId) {
+      showToast("No saved schedule to update");
       return;
     }
     setSaving(true);
     try {
-      await updateGeneration(generationId, {
-        title: result.projectName,
-        summary: `${result.tasks.length} tasks · ${result.phases.length} phases · ${result.totalDays} days`,
-        result_data: result,
-      });
+      await persistCurrent(result);
       setDirty(false);
       showToast("Changes saved!");
     } catch (e) {
@@ -294,18 +373,14 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     }
   };
 
-  // Auto-save edits back to Supabase so navigating away via history links
-  // shows the edited version. Debounced to avoid a request per keystroke.
   useEffect(() => {
-    if (!dirty || !generationId || !result) return;
+    if (!dirty || !result) return;
+    if (inHistoryMode && !generationId) return;
+    if (!inHistoryMode && !activeProject?.id) return;
     const timer = setTimeout(async () => {
       setSaving(true);
       try {
-        await updateGeneration(generationId, {
-          title: result.projectName,
-          summary: `${result.tasks.length} tasks · ${result.phases.length} phases · ${result.totalDays} days`,
-          result_data: result,
-        });
+        await persistCurrent(result);
         setDirty(false);
       } catch (e) {
         console.warn("Auto-save failed:", e.message);
@@ -314,41 +389,51 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
       }
     }, 1200);
     return () => clearTimeout(timer);
-  }, [dirty, generationId, result]);
-  // Whenever tasks change, cascade dependency starts forward and recompute totalDays.
+  }, [dirty, generationId, result, inHistoryMode, activeProject?.id]);
+
   const applyTaskChange = (r, nextTasks) => {
     const cascaded = cascadeSchedule(nextTasks);
-    return { ...r, tasks: cascaded, totalDays: computeTotalDays(cascaded) };
+    return { ...r, schedule_tasks: cascaded, totalDays: computeTotalDays(cascaded) };
   };
 
-  const updateTask = (idx, field, value) =>
-    updateResult((r) => applyTaskChange(r, r.tasks.map((t, i) => i === idx ? { ...t, [field]: value } : t)));
-  const deleteTask = (idx) =>
+  const updateTask = (taskId, field, value) =>
+    updateResult((r) => applyTaskChange(r, (r.schedule_tasks || []).map((t) => t.id === taskId ? { ...t, [field]: value } : t)));
+  const deleteTask = (taskId) =>
     updateResult((r) => {
-      const removedId = r.tasks[idx]?.id;
-      const filtered = r.tasks
-        .filter((_, i) => i !== idx)
-        .map((t) => removedId != null
-          ? { ...t, dependencies: (t.dependencies || []).filter((d) => String(d) !== String(removedId)) }
-          : t);
+      const filtered = (r.schedule_tasks || [])
+        .filter((t) => t.id !== taskId)
+        .map((t) => ({ ...t, dependencies: (t.dependencies || []).filter((d) => d !== taskId) }));
       return applyTaskChange(r, filtered);
     });
   const addTask = () => {
     updateResult((r) => {
-      const nextId = (r.tasks.reduce((m, t) => Math.max(m, Number(t.id) || 0), 0) || 0) + 1;
-      const defaultPhase = r.phases?.[0] || "";
-      const nextTasks = [...r.tasks, { id: nextId, task: "", phase: defaultPhase, startDay: 1, durationDays: 1, dependencies: [], trade: "", notes: "" }];
+      const defaultPhase = r.schedule_phases?.[0] || "";
+      const nextTasks = [...(r.schedule_tasks || []), makeBlankTask({ phase: defaultPhase }, "user_added")];
       return applyTaskChange(r, nextTasks);
     });
   };
+
+  // Dependency input handler — converts a comma-separated string of ordinals
+  // ("1, 2, 5") back into the UUID dependency array.
+  const updateTaskDependencies = (taskId, raw) => {
+    const ordinals = String(raw)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => Number(s))
+      .filter((n) => Number.isFinite(n));
+    const uuids = ordinals.map((n) => ordinalToId.get(n)).filter(Boolean);
+    updateTask(taskId, "dependencies", uuids);
+  };
+
   const updateSub = (idx, field, value) =>
-    updateResult((r) => ({ ...r, subcontractors: r.subcontractors.map((s, i) => i === idx ? { ...s, [field]: value } : s) }));
+    updateResult((r) => ({ ...r, schedule_subcontractors: (r.schedule_subcontractors || []).map((s, i) => i === idx ? { ...s, [field]: value } : s) }));
   const deleteSub = (idx) =>
-    updateResult((r) => ({ ...r, subcontractors: r.subcontractors.filter((_, i) => i !== idx) }));
+    updateResult((r) => ({ ...r, schedule_subcontractors: (r.schedule_subcontractors || []).filter((_, i) => i !== idx) }));
   const addSub = () => {
     updateResult((r) => ({
       ...r,
-      subcontractors: [...(r.subcontractors || []), { trade: "", phase: r.phases?.[0] || "", estimatedDays: 0, recommendedSubTypes: [], scope: "" }],
+      schedule_subcontractors: [...(r.schedule_subcontractors || []), { trade: "", phase: r.schedule_phases?.[0] || "", estimatedDays: 0, recommendedSubTypes: [], scope: "" }],
     }));
   };
 
@@ -358,18 +443,18 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
   const toEmailHtml = (r, clientName, branding = {}) => {
     const { hasLogo, logoCid, companyName } = branding;
-    const taskRows = r.tasks.map((t) => `
+    const taskRows = (r.schedule_tasks || []).map((t, idx) => `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc(t.id)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${idx + 1}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:13px;font-weight:600;">${esc(t.task)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(t.phase)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(t.trade)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;">Day ${esc(t.startDay)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;">${esc(t.durationDays)}d</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc((t.dependencies || []).join(", ") || "—")}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:11px;color:#909ab0;">${esc((t.dependencies || []).map((d) => idToOrdinal.get(d)).filter(Boolean).join(", ") || "—")}</td>
       </tr>`).join("");
 
-    const subRows = (r.subcontractors || []).map((s) => `
+    const subRows = (r.schedule_subcontractors || []).map((s) => `
       <tr>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:13px;font-weight:600;">${esc(s.trade)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#606880;">${esc(s.phase)}</td>
@@ -394,7 +479,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
           ${brandingHeader}
           <div style="font-size:11px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin-bottom:8px;">Project Schedule</div>
           <h1 style="font-size:24px;margin:0 0 6px;color:#1a1f2e;letter-spacing:0.02em;">${esc(r.projectName)}</h1>
-          <div style="font-size:12px;color:#909ab0;">${esc(r.totalDays)} days · ${r.tasks.length} tasks · ${r.phases.length} phases</div>
+          <div style="font-size:12px;color:#909ab0;">${esc(r.totalDays)} days · ${(r.schedule_tasks || []).length} tasks · ${(r.schedule_phases || []).length} phases</div>
           ${clientName ? `<p style="font-size:14px;color:#1a1f2e;margin:22px 0 0;">Hi ${esc(clientName)},</p>
           <p style="font-size:14px;color:#1a1f2e;line-height:1.6;margin:8px 0 0;">Here is the proposed construction schedule for your project. Let me know if you have any questions.</p>` : ""}
           <h3 style="font-size:12px;letter-spacing:0.12em;color:#909ab0;text-transform:uppercase;margin:24px 0 10px;">Task Schedule</h3>
@@ -461,7 +546,6 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
       {(status === "idle" || status === "error") && (
         <>
-          {/* Scope handoff banner */}
           {scopeHandoff && (
             <div style={{ background: "rgba(74,144,226,0.06)", border: "1px solid rgba(74,144,226,0.2)", padding: "12px 16px", marginBottom: 20, borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
               <span style={{ fontSize: 18 }}>📋</span>
@@ -532,28 +616,26 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
             </div>
             <div className="stat-card">
               <div className="stat-label">Total Tasks</div>
-              <div className="stat-value">{result.tasks.length}</div>
-              <div className="stat-sub">across {result.phases.length} phases</div>
+              <div className="stat-value">{(result.schedule_tasks || []).length}</div>
+              <div className="stat-sub">across {(result.schedule_phases || []).length} phases</div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Trades</div>
-              <div className="stat-value">{result.subcontractors.length}</div>
+              <div className="stat-value">{(result.schedule_subcontractors || []).length}</div>
               <div className="stat-sub">subcontractor rows</div>
             </div>
           </div>
 
           <div className="result-actions" style={{ marginBottom: 22 }}>
             <button className="btn btn-primary" onClick={exportTSV}>⬇ Download Schedule (.TSV)</button>
-            {generationId && (
-              <button
-                className="btn"
-                style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
-                disabled={saving || !dirty}
-                onClick={saveChanges}
-              >
-                {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
-              </button>
-            )}
+            <button
+              className="btn"
+              style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
+              disabled={saving || !dirty}
+              onClick={saveChanges}
+            >
+              {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
+            </button>
             <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
             <button className="btn btn-ghost" onClick={reset}>↩ New Schedule</button>
           </div>
@@ -565,45 +647,45 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                 <tr>{["#","Task","Phase","Trade","Start","Days","Deps"].map((h) => <th key={h}>{h}</th>)}<th></th></tr>
               </thead>
               <tbody>
-                {result.tasks.map((t, idx) => {
+                {(result.schedule_tasks || []).map((t, idx) => {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
-                    <tr key={`${t.id}-${idx}`}>
-                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{t.id}</td>
+                    <tr key={t.id}>
+                      <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{idx + 1}</td>
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
                           value={t.task}
-                          onChange={(e) => updateTask(idx, "task", e.target.value)} />
+                          onChange={(e) => updateTask(t.id, "task", e.target.value)} />
                       </td>
                       <td style={{ minWidth: 110 }}>
                         <select
                           className="edit-input"
                           style={{ background: pc.bg, color: pc.color, fontSize: 11, padding: "3px 5px", border: "1px solid transparent", borderRadius: 4 }}
                           value={t.phase}
-                          onChange={(e) => updateTask(idx, "phase", e.target.value)}
+                          onChange={(e) => updateTask(t.id, "phase", e.target.value)}
                         >
-                          {result.phases.map((p) => <option key={p} value={p}>{p}</option>)}
+                          {(result.schedule_phases || []).map((p) => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </td>
                       <td style={{ color: "#606880", minWidth: 100 }}>
                         <input className="edit-input" style={{ fontSize: 12, color: "#606880" }}
                           value={t.trade}
-                          onChange={(e) => updateTask(idx, "trade", e.target.value)} />
+                          onChange={(e) => updateTask(t.id, "trade", e.target.value)} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 80 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 60 }} type="number" min="1"
                           value={t.startDay}
-                          onChange={(e) => updateTask(idx, "startDay", Number(e.target.value) || 1)} />
+                          onChange={(e) => updateTask(t.id, "startDay", Number(e.target.value) || 1)} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 70 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 50 }} type="number" min="1"
                           value={t.durationDays}
-                          onChange={(e) => updateTask(idx, "durationDays", Number(e.target.value) || 1)} />
+                          onChange={(e) => updateTask(t.id, "durationDays", Number(e.target.value) || 1)} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8", minWidth: 90 }}>
                         <input className="edit-input" style={{ fontSize: 10, color: "#606880" }}
-                          value={(t.dependencies || []).join(", ")}
-                          onChange={(e) => updateTask(idx, "dependencies", e.target.value.split(",").map((s) => s.trim()).filter(Boolean).map((v) => Number(v) || v))}
+                          value={(t.dependencies || []).map((d) => idToOrdinal.get(d)).filter(Boolean).join(", ")}
+                          onChange={(e) => updateTaskDependencies(t.id, e.target.value)}
                           placeholder="e.g. 1, 2" />
                       </td>
                       <td className="row-delete-cell">
@@ -611,7 +693,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                           type="button"
                           className="delete-icon-btn"
                           title="Delete task"
-                          onClick={() => deleteTask(idx)}
+                          onClick={() => deleteTask(t.id)}
                         >🗑</button>
                       </td>
                     </tr>
@@ -629,7 +711,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                 <tr>{["Trade","Phase","Est. Days","Sub Types","Scope"].map((h) => <th key={h}>{h}</th>)}<th></th></tr>
               </thead>
               <tbody>
-                {result.subcontractors.map((s, i) => {
+                {(result.schedule_subcontractors || []).map((s, i) => {
                   const pc = phaseMap[s.phase] || PHASE_COLORS[0];
                   return (
                     <tr key={i}>
@@ -645,7 +727,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                           value={s.phase}
                           onChange={(e) => updateSub(i, "phase", e.target.value)}
                         >
-                          {result.phases.map((p) => <option key={p} value={p}>{p}</option>)}
+                          {(result.schedule_phases || []).map((p) => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 90 }}>
