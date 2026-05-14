@@ -1,16 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
 import {
-  getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById,
+  getProjectFileAsBase64, saveGeneration, getGenerationById,
   getUserSettings,
-  getProjectActiveSchedule, saveActiveSchedule,
+  getProjectActiveSchedule, saveActiveSchedule, setScheduleLocked,
 } from "../lib/projects";
 import { loadLogoAttachment } from "../lib/companyLogo";
 import {
   ensureStructuredSchedule, flattenStructuredSchedule, buildScheduleOrdinalMaps, makeBlankTask, originClassName,
 } from "../lib/structuredData";
+import LockToggle from "../components/LockToggle";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToClientModal from "../components/SendToClientModal";
@@ -130,6 +131,11 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
 
+  // Lock state: mirrors projects.schedule_locked.
+  const [locked, setLocked] = useState(false);
+  const [lockBusy, setLockBusy] = useState(false);
+  const [historyMeta, setHistoryMeta] = useState(null); // { createdAt, projectId }
+
   const inHistoryMode = !!historyId;
 
   useEffect(() => {
@@ -154,6 +160,12 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     }
     let cancelled = false;
     (async () => {
+      // Always pull the lock state from the project record, even when
+      // there's no schedule content yet (a fresh project can be pre-locked).
+      const raw = await getProjectActiveSchedule(activeProject.id);
+      if (cancelled) return;
+      setLocked(!!raw?.schedule_locked);
+
       const active = await loadActiveSchedule(activeProject.id);
       if (cancelled) return;
       if (active) {
@@ -186,6 +198,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
         setStatus("done");
         setError("");
         setGenerationId(g.id);
+        setHistoryMeta({ createdAt: g.created_at, projectId: g.project_id });
         setDirty(false);
       }
     })();
@@ -344,34 +357,26 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   };
 
   const updateResult = (updater) => {
+    if (inHistoryMode) return; // history mode is read-only
     setResult((prev) => prev ? updater(prev) : prev);
     setDirty(true);
   };
 
   const persistCurrent = async (current) => {
-    if (inHistoryMode && generationId) {
-      await updateGeneration(generationId, {
-        title: current.projectName,
-        summary: `${current.schedule_tasks.length} tasks · ${current.schedule_phases.length} phases · ${current.totalDays} days`,
-        result_data: flattenStructuredSchedule(current),
-      });
-    } else if (activeProject?.id) {
-      await saveActiveSchedule(activeProject.id, {
-        schedule_tasks: current.schedule_tasks,
-        schedule_phases: current.schedule_phases,
-        schedule_subcontractors: current.schedule_subcontractors,
-      });
-    }
+    // Active mode only. History-mode write path removed — historical rows
+    // are immutable snapshots of AI output.
+    if (!activeProject?.id) return;
+    await saveActiveSchedule(activeProject.id, {
+      schedule_tasks: current.schedule_tasks,
+      schedule_phases: current.schedule_phases,
+      schedule_subcontractors: current.schedule_subcontractors,
+    });
   };
 
   const saveChanges = async () => {
-    if (!result) return;
-    if (!inHistoryMode && !activeProject?.id) {
+    if (!result || inHistoryMode) return;
+    if (!activeProject?.id) {
       showToast("Select a project before saving");
-      return;
-    }
-    if (inHistoryMode && !generationId) {
-      showToast("No saved schedule to update");
       return;
     }
     setSaving(true);
@@ -388,8 +393,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
   useEffect(() => {
     if (!dirty || !result) return;
-    if (inHistoryMode && !generationId) return;
-    if (!inHistoryMode && !activeProject?.id) return;
+    if (inHistoryMode) return; // history mode is read-only, no auto-save
+    if (!activeProject?.id) return;
     const timer = setTimeout(async () => {
       setSaving(true);
       try {
@@ -402,7 +407,79 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
       }
     }, 1200);
     return () => clearTimeout(timer);
-  }, [dirty, generationId, result, inHistoryMode, activeProject?.id]);
+  }, [dirty, result, inHistoryMode, activeProject?.id]);
+
+  // ── Lock toggle ──────────────────────────────────────────────────────────
+  const toggleLock = async () => {
+    if (!activeProject?.id || lockBusy) return;
+    if (locked) {
+      if (!window.confirm(
+        "Unlocking allows new AI generations to overwrite the current schedule. Your current items stay until you regenerate. Continue?"
+      )) return;
+    }
+    setLockBusy(true);
+    try {
+      const next = !locked;
+      await setScheduleLocked(activeProject.id, next);
+      setLocked(next);
+    } catch (e) {
+      showToast("Could not change lock: " + e.message);
+    } finally {
+      setLockBusy(false);
+    }
+  };
+
+  // ── Restore (history mode → active) ──────────────────────────────────────
+  const restore = async () => {
+    if (!result) return;
+    const projectId = historyMeta?.projectId || activeProject?.id;
+    if (!projectId) {
+      showToast("Cannot restore — no project context.");
+      return;
+    }
+    let activeLocked = false;
+    try {
+      const raw = await getProjectActiveSchedule(projectId);
+      activeLocked = !!raw?.schedule_locked;
+    } catch {}
+
+    const confirmMsg = activeLocked
+      ? "The active schedule is locked. Restoring this version will replace it. Unlock and restore?"
+      : "Restore this version? It will replace your current active schedule.";
+    if (!window.confirm(confirmMsg)) return;
+
+    // Round-trip via legacy → structured: fresh UUIDs, completion all false.
+    const fresh = ensureStructuredSchedule(flattenStructuredSchedule(result));
+    setSaving(true);
+    try {
+      await saveActiveSchedule(projectId, {
+        schedule_tasks: fresh.schedule_tasks,
+        schedule_phases: fresh.schedule_phases,
+        schedule_subcontractors: fresh.schedule_subcontractors,
+      });
+      if (activeLocked) {
+        await setScheduleLocked(projectId, false);
+      }
+      setLocked(false);
+      setResult(fresh);
+      setGenerationId(null);
+      setHistoryMeta(null);
+      setDirty(false);
+      const p = new URLSearchParams(searchParams);
+      p.delete("historyId");
+      setSearchParams(p, { replace: true });
+      showToast("Restored — now editable as the active schedule.");
+    } catch (e) {
+      showToast("Restore failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const historyTimestamp = useMemo(() => {
+    if (!historyMeta?.createdAt) return "";
+    try { return new Date(historyMeta.createdAt).toLocaleString(); } catch { return ""; }
+  }, [historyMeta]);
 
   const applyTaskChange = (r, nextTasks) => {
     const sorted = sortTasksByPhase(nextTasks, r.schedule_phases || []);
@@ -564,8 +641,38 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   };
 
   return (
-    <div className="fade-up">
-      <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
+    <div className={`fade-up${inHistoryMode ? " tool-readonly" : ""}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
+        </div>
+        {!inHistoryMode && activeProject?.id && (
+          <LockToggle locked={locked} onToggle={toggleLock} disabled={lockBusy} />
+        )}
+      </div>
+
+      {inHistoryMode && (
+        <div className="history-banner">
+          <div className="history-banner-text">
+            <div className="history-banner-title">👁 Viewing a saved version (read-only)</div>
+            {historyTimestamp && <div className="history-banner-meta">{historyTimestamp}</div>}
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={restore}
+            disabled={saving || !result}
+          >
+            {saving ? "Restoring…" : "↻ Restore This Version"}
+          </button>
+        </div>
+      )}
+
+      {locked && !inHistoryMode && (
+        <div className="locked-banner">
+          🔒 This schedule is locked as the project source of truth.
+        </div>
+      )}
 
       {(status === "idle" || status === "error") && (
         <>
@@ -619,7 +726,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
           {error && <div className="error-box">⚠ {error}</div>}
           <button
             className="btn btn-primary btn-lg"
-            disabled={!scopeHandoff && files.length === 0 && selectedPF.length === 0 && !projName.trim()}
+            disabled={locked || (!scopeHandoff && files.length === 0 && selectedPF.length === 0 && !projName.trim())}
+            title={locked ? "Unlock to regenerate" : undefined}
             onClick={generate}
           >
             📅 Generate Schedule
@@ -651,16 +759,20 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
           <div className="result-actions" style={{ marginBottom: 22 }}>
             <button className="btn btn-primary" onClick={exportTSV}>⬇ Download Schedule (.TSV)</button>
-            <button
-              className="btn"
-              style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
-              disabled={saving || !dirty}
-              onClick={saveChanges}
-            >
-              {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
-            </button>
-            <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
-            <button className="btn btn-ghost" onClick={reset}>↩ New Schedule</button>
+            {!inHistoryMode && (
+              <>
+                <button
+                  className="btn"
+                  style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
+                  disabled={saving || !dirty}
+                  onClick={saveChanges}
+                >
+                  {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
+                </button>
+                <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
+                <button className="btn btn-ghost" onClick={reset}>↩ New Schedule</button>
+              </>
+            )}
           </div>
 
           <div className="section-label">Schedule Preview</div>
@@ -678,7 +790,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
                           value={t.task}
-                          onChange={(e) => updateTask(t.id, "task", e.target.value)} />
+                          onChange={(e) => updateTask(t.id, "task", e.target.value)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ minWidth: 110 }}>
                         <select
@@ -686,6 +799,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                           style={{ background: pc.bg, color: pc.color, fontSize: 11, padding: "3px 5px", border: "1px solid transparent", borderRadius: 4 }}
                           value={t.phase}
                           onChange={(e) => updateTask(t.id, "phase", e.target.value)}
+                          disabled={inHistoryMode}
                         >
                           {(result.schedule_phases || []).map((p) => <option key={p} value={p}>{p}</option>)}
                         </select>
@@ -693,38 +807,46 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                       <td style={{ color: "#606880", minWidth: 100 }}>
                         <input className="edit-input" style={{ fontSize: 12, color: "#606880" }}
                           value={t.trade}
-                          onChange={(e) => updateTask(t.id, "trade", e.target.value)} />
+                          onChange={(e) => updateTask(t.id, "trade", e.target.value)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 80 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 60 }} type="number" min="1"
                           value={t.startDay}
-                          onChange={(e) => updateTask(t.id, "startDay", Number(e.target.value) || 1)} />
+                          onChange={(e) => updateTask(t.id, "startDay", Number(e.target.value) || 1)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 70 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 50 }} type="number" min="1"
                           value={t.durationDays}
-                          onChange={(e) => updateTask(t.id, "durationDays", Number(e.target.value) || 1)} />
+                          onChange={(e) => updateTask(t.id, "durationDays", Number(e.target.value) || 1)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8", minWidth: 90 }}>
                         <input className="edit-input" style={{ fontSize: 10, color: "#606880" }}
                           value={(t.dependencies || []).map((d) => idToOrdinal.get(d)).filter(Boolean).join(", ")}
                           onChange={(e) => updateTaskDependencies(t.id, e.target.value)}
-                          placeholder="e.g. 1, 2" />
+                          placeholder="e.g. 1, 2"
+                          readOnly={inHistoryMode} />
                       </td>
                       <td className="row-delete-cell">
-                        <button
-                          type="button"
-                          className="delete-icon-btn"
-                          title="Delete task"
-                          onClick={() => deleteTask(t.id)}
-                        >🗑</button>
+                        {!inHistoryMode && (
+                          <button
+                            type="button"
+                            className="delete-icon-btn"
+                            title="Delete task"
+                            onClick={() => deleteTask(t.id)}
+                          >🗑</button>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            <button type="button" className="add-line-btn" onClick={addTask}>＋ Add Task</button>
+            {!inHistoryMode && (
+              <button type="button" className="add-line-btn" onClick={addTask}>＋ Add Task</button>
+            )}
           </div>
 
           <div className="section-label">Subcontractor Worksheet</div>
@@ -741,7 +863,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                       <td style={{ minWidth: 120 }}>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
                           value={s.trade}
-                          onChange={(e) => updateSub(i, "trade", e.target.value)} />
+                          onChange={(e) => updateSub(i, "trade", e.target.value)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ minWidth: 110 }}>
                         <select
@@ -749,6 +872,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                           style={{ background: pc.bg, color: pc.color, fontSize: 11, padding: "3px 5px", border: "1px solid transparent", borderRadius: 4 }}
                           value={s.phase}
                           onChange={(e) => updateSub(i, "phase", e.target.value)}
+                          disabled={inHistoryMode}
                         >
                           {(result.schedule_phases || []).map((p) => <option key={p} value={p}>{p}</option>)}
                         </select>
@@ -756,32 +880,39 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 90 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 60 }} type="number" min="0"
                           value={s.estimatedDays}
-                          onChange={(e) => updateSub(i, "estimatedDays", Number(e.target.value) || 0)} />
+                          onChange={(e) => updateSub(i, "estimatedDays", Number(e.target.value) || 0)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontSize: 11, color: "#606880", minWidth: 160 }}>
                         <input className="edit-input" style={{ fontSize: 11, color: "#606880" }}
                           value={(s.recommendedSubTypes || []).join(", ")}
-                          onChange={(e) => updateSub(i, "recommendedSubTypes", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} />
+                          onChange={(e) => updateSub(i, "recommendedSubTypes", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontSize: 11, color: "#606880", minWidth: 180 }}>
                         <input className="edit-input" style={{ fontSize: 11, color: "#606880" }}
                           value={s.scope}
-                          onChange={(e) => updateSub(i, "scope", e.target.value)} />
+                          onChange={(e) => updateSub(i, "scope", e.target.value)}
+                          readOnly={inHistoryMode} />
                       </td>
                       <td className="row-delete-cell">
-                        <button
-                          type="button"
-                          className="delete-icon-btn"
-                          title="Delete row"
-                          onClick={() => deleteSub(i)}
-                        >🗑</button>
+                        {!inHistoryMode && (
+                          <button
+                            type="button"
+                            className="delete-icon-btn"
+                            title="Delete row"
+                            onClick={() => deleteSub(i)}
+                          >🗑</button>
+                        )}
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            <button type="button" className="add-line-btn" onClick={addSub}>＋ Add Subcontractor</button>
+            {!inHistoryMode && (
+              <button type="button" className="add-line-btn" onClick={addSub}>＋ Add Subcontractor</button>
+            )}
           </div>
         </>
       )}
