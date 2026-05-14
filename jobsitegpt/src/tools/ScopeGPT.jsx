@@ -11,7 +11,7 @@ import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 import { loadLogoAttachment } from "../lib/companyLogo";
 import {
   ensureStructuredScope, flattenStructuredScope,
-  makeBlankLineItem, makeBlankNoteItem, makeBlankTrade,
+  makeBlankLineItem, makeBlankNoteItem, makeBlankTrade, originClassName,
 } from "../lib/structuredData";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
@@ -758,7 +758,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
           <div className="section-label">Scope by Trade</div>
           {(result.scope_trades || []).map((t, idx) => (
-            <div key={t.id} className={`trade-block${t.origin === "user_added" ? " user-added" : ""}`}>
+            <div key={t.id} className={`trade-block ${originClassName(t.origin)}`}>
               <div className="trade-header editable-row">
                 <span className="trade-num">#{String(idx + 1).padStart(2, "0")}</span>
                 <input
@@ -789,7 +789,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                 />
                 <div className="line-items">
                   {(t.lineItems || []).map((li) => (
-                    <div key={li.id} className={`line-item editable-row${li.origin === "user_added" ? " user-added" : ""}`}>
+                    <div key={li.id} className={`line-item editable-row ${originClassName(li.origin)}`}>
                       <span className="line-bullet">▸</span>
                       <div className="edit-body">
                         <input
@@ -866,7 +866,7 @@ function renderNotesSection(title, field, items, helpers) {
       <div className="notes-block">
         <div className="notes-list">
           {list.map((item) => (
-            <div key={item.id} className={`notes-item editable-row${item.origin === "user_added" ? " user-added" : ""}`} style={{ display: "flex" }}>
+            <div key={item.id} className={`notes-item editable-row ${originClassName(item.origin)}`} style={{ display: "flex" }}>
               <div className="edit-body" style={{ flex: 1 }}>
                 <input
                   className="edit-input"

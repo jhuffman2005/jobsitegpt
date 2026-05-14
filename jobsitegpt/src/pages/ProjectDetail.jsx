@@ -6,6 +6,7 @@ import {
   deleteProjectFile, getProjectFileUrl,
   getGenerations, getSmartLogs,
 } from "../lib/projects";
+import ScopeOrScheduleUpload from "../components/ScopeOrScheduleUpload";
 
 export default function ProjectDetail({ onProjectLoad }) {
   const { id } = useParams();
@@ -30,6 +31,16 @@ export default function ProjectDetail({ onProjectLoad }) {
   });
 
   useEffect(() => { load(); }, [id]);
+
+  // Refresh "do we already have scope/schedule content?" flags after an
+  // upload completes — drives whether the next upload prompts for confirm.
+  const reloadProject = async () => {
+    try {
+      const [p, g] = await Promise.all([getProject(id), getGenerations(id)]);
+      setProject(p);
+      setGenerations(g);
+    } catch (e) { setError(e.message); }
+  };
 
   const load = async () => {
     try {
@@ -162,6 +173,25 @@ export default function ProjectDetail({ onProjectLoad }) {
         <label className="field-label">Project Notes</label>
         <textarea placeholder="Any additional context for this project…" value={form.notes} onChange={e => set("notes", e.target.value)} style={{ minHeight: 80 }} />
       </div>
+
+      <div className="section-label">Import Existing Scope or Schedule</div>
+      <div style={{ fontSize: 12, color: "#606880", marginBottom: 12, lineHeight: 1.55 }}>
+        Optional. If you already have a written scope or schedule for this project, drop it here. You can import it as-is or use it as the seed for a full AI-generated version.
+      </div>
+      <ScopeOrScheduleUpload
+        type="scope"
+        projectId={id}
+        projectName={form.name}
+        hasExistingContent={!!project?.scope_trades}
+        onAccepted={reloadProject}
+      />
+      <ScopeOrScheduleUpload
+        type="schedule"
+        projectId={id}
+        projectName={form.name}
+        hasExistingContent={!!project?.schedule_tasks}
+        onAccepted={reloadProject}
+      />
 
       <div className="section-label">SmartLog</div>
       <div style={{ background: "#ffffff", border: "1.5px solid #e0e4ef", padding: "16px 20px", borderRadius: 8, marginBottom: 22 }}>

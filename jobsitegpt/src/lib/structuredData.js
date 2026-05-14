@@ -303,3 +303,102 @@ export function makeBlankTrade({ tradeName = "", contractor = "", scopeText = ""
     lineItems: [],
   };
 }
+
+// CSS class for an item's origin badge. Three origins, three visual states:
+//   ai_generated → no class (default rendering)
+//   user_added   → blue left accent (.user-added)
+//   uploaded     → green left accent (.uploaded)
+export function originClassName(origin) {
+  if (origin === "user_added") return "user-added";
+  if (origin === "uploaded") return "uploaded";
+  return "";
+}
+
+// ── Upload-parse output normalizers ───────────────────────────────────────
+// The USE-AS-IS upload path asks the model for a hybrid shape: top-level
+// `scope_trades` / `scope_notes` keys (new), but items inside lack UUIDs and
+// completion fields and the note categories are plain string arrays. These
+// helpers normalize that into the proper structured shape with UUIDs,
+// completion fields, and a caller-provided origin (typically "uploaded").
+//
+// Distinct from ensureStructuredScope/Schedule, which:
+//   - assume legacy shape OR already-fully-structured input
+//   - hardcode origin to "ai_generated"
+//   - are idempotent on truly-structured data (no re-UUID)
+
+export function structureFromUploadScope(parsed, origin = "uploaded") {
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const trades = (Array.isArray(parsed.scope_trades) ? parsed.scope_trades : []).map((t) => ({
+    id: newId(),
+    tradeName: t?.tradeName ?? "",
+    contractor: t?.contractor ?? "",
+    scopeText: t?.scopeText ?? "",
+    origin,
+    lineItems: (Array.isArray(t?.lineItems) ? t.lineItems : []).map((li) => ({
+      id: newId(),
+      description: li?.description ?? "",
+      note: li?.note ?? null,
+      origin,
+      completed: false,
+      completed_date: null,
+      completed_by_log_id: null,
+    })),
+  }));
+
+  const toNote = (text) => ({
+    id: newId(),
+    text: typeof text === "string" ? text : String(text ?? ""),
+    origin,
+    completed: false,
+    completed_date: null,
+    completed_by_log_id: null,
+  });
+
+  const notes = parsed.scope_notes || {};
+  return {
+    projectName: "",
+    projectType: "",
+    projectAddress: null,
+    overview: "",
+    estimatedDuration: "",
+    totalLineItemCount: trades.reduce((n, t) => n + t.lineItems.length, 0),
+    scope_trades: trades,
+    scope_notes: {
+      generalConditions: (Array.isArray(notes.generalConditions) ? notes.generalConditions : []).map(toNote),
+      exclusions:        (Array.isArray(notes.exclusions)        ? notes.exclusions        : []).map(toNote),
+      clarifications:    (Array.isArray(notes.clarifications)    ? notes.clarifications    : []).map(toNote),
+    },
+  };
+}
+
+export function structureFromUploadSchedule(parsed, origin = "uploaded") {
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const tasks = (Array.isArray(parsed.schedule_tasks) ? parsed.schedule_tasks : []).map((t) => {
+    const startDay = Number(t?.startDay);
+    const durationDays = Number(t?.durationDays);
+    return {
+      id: newId(),
+      task: t?.task ?? "",
+      phase: t?.phase ?? "",
+      trade: t?.trade ?? "",
+      notes: t?.notes ?? "",
+      startDay: Number.isFinite(startDay) ? startDay : 0,
+      durationDays: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : 1,
+      dependencies: [], // per spec: USE AS-IS leaves dependencies empty
+      origin,
+      completed: false,
+      completed_date: null,
+      completed_by_log_id: null,
+    };
+  });
+
+  return {
+    projectName: "",
+    totalDays: tasks.reduce((m, t) => Math.max(m, (Number(t.startDay) || 0) + (Number(t.durationDays) || 0)), 0),
+    schedule_tasks: tasks,
+    schedule_phases: Array.isArray(parsed.schedule_phases) ? parsed.schedule_phases.map(String) : [],
+    schedule_subcontractors: Array.isArray(parsed.schedule_subcontractors) ? parsed.schedule_subcontractors : [],
+  };
+}

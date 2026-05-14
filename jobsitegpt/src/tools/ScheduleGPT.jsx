@@ -9,7 +9,7 @@ import {
 } from "../lib/projects";
 import { loadLogoAttachment } from "../lib/companyLogo";
 import {
-  ensureStructuredSchedule, flattenStructuredSchedule, buildScheduleOrdinalMaps, makeBlankTask,
+  ensureStructuredSchedule, flattenStructuredSchedule, buildScheduleOrdinalMaps, makeBlankTask, originClassName,
 } from "../lib/structuredData";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
@@ -673,7 +673,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                 {(result.schedule_tasks || []).map((t, idx) => {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
-                    <tr key={t.id} className={t.origin === "user_added" ? "user-added" : undefined}>
+                    <tr key={t.id} className={originClassName(t.origin) || undefined}>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{idx + 1}</td>
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
