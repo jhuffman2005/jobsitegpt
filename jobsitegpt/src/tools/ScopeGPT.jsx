@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, downloadDoc, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
@@ -116,12 +116,6 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
   const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
-
-  // Inline "+ Add Trade" form state. Stays collapsed until clicked; saves
-  // append a structured trade with origin: "user_added" to scope_trades.
-  const [newTradeOpen, setNewTradeOpen] = useState(false);
-  const [newTradeFields, setNewTradeFields] = useState({ tradeName: "", contractor: "", scopeText: "" });
-  const [newTradeError, setNewTradeError] = useState(false);
 
   const inHistoryMode = !!historyId;
 
@@ -457,41 +451,14 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     }));
   };
 
-  const openNewTrade = () => {
-    setNewTradeFields({ tradeName: "", contractor: "", scopeText: "" });
-    setNewTradeError(false);
-    setNewTradeOpen(true);
-  };
-  const cancelNewTrade = () => {
-    setNewTradeFields({ tradeName: "", contractor: "", scopeText: "" });
-    setNewTradeError(false);
-    setNewTradeOpen(false);
-  };
-  const saveNewTrade = () => {
-    if (!newTradeFields.tradeName.trim()) {
-      setNewTradeError(true);
-      return;
-    }
-    const trade = makeBlankTrade({
-      tradeName: newTradeFields.tradeName.trim(),
-      contractor: newTradeFields.contractor.trim(),
-      scopeText: newTradeFields.scopeText.trim(),
-    });
+  // Append a blank user-added trade — same pattern as "+ Add Line" and
+  // "+ Add Task". The user types into the always-editable trade-header
+  // inputs after it appears. Auto-save persists.
+  const addTrade = () =>
     updateResult((r) => ({
       ...r,
-      scope_trades: [...(r.scope_trades || []), trade],
+      scope_trades: [...(r.scope_trades || []), makeBlankTrade()],
     }));
-    cancelNewTrade();
-  };
-  const onNewTradeKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey && e.target.tagName !== "TEXTAREA") {
-      e.preventDefault();
-      saveNewTrade();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      cancelNewTrade();
-    }
-  };
 
   const updateNote = (field, itemId, value) =>
     updateResult((r) => ({
@@ -666,10 +633,14 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     return () => { cancelled = true; };
   }, [tradesOpen]);
 
-  // The modal expects legacy shape (it has been around since before this
-  // migration and reads scope.trades). We flatten here so the modal stays
-  // shape-agnostic.
-  const flatScopeForModal = result ? flattenStructuredScope(result) : null;
+  // The modal expects legacy shape (reads scope.trades). useMemo so the
+  // reference is stable across renders that don't change `result` — the
+  // modal's useEffect depends on `scope` identity and would otherwise reset
+  // typed-in emails when tradeBranding resolves async or auto-save fires.
+  const flatScopeForModal = useMemo(
+    () => result ? flattenStructuredScope(result) : null,
+    [result]
+  );
 
   const tradeSendHandler = (row) => {
     const trade = (result.scope_trades || []).find((t) => t.tradeName === row.tradeName);
@@ -850,37 +821,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
             </div>
           ))}
 
-          {newTradeOpen ? (
-            <div className="new-trade-form" onKeyDown={onNewTradeKey}>
-              <input
-                className={`edit-input${newTradeError && !newTradeFields.tradeName.trim() ? " field-required" : ""}`}
-                style={{ fontWeight: 700, fontSize: 16 }}
-                placeholder="Trade name (required) — e.g. Electrical"
-                value={newTradeFields.tradeName}
-                onChange={(e) => setNewTradeFields((f) => ({ ...f, tradeName: e.target.value }))}
-                autoFocus
-              />
-              <input
-                className="edit-input"
-                style={{ fontSize: 12 }}
-                placeholder="Contractor (optional)"
-                value={newTradeFields.contractor}
-                onChange={(e) => setNewTradeFields((f) => ({ ...f, contractor: e.target.value }))}
-              />
-              <textarea
-                className="edit-textarea"
-                placeholder="Scope description (optional)"
-                value={newTradeFields.scopeText}
-                onChange={(e) => setNewTradeFields((f) => ({ ...f, scopeText: e.target.value }))}
-              />
-              <div className="form-actions">
-                <button type="button" className="btn btn-ghost" onClick={cancelNewTrade}>Cancel</button>
-                <button type="button" className="btn btn-primary" onClick={saveNewTrade}>Save Trade</button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="add-line-btn" style={{ marginBottom: 14 }} onClick={openNewTrade}>＋ Add Trade</button>
-          )}
+          <button type="button" className="add-line-btn" style={{ marginBottom: 14 }} onClick={addTrade}>＋ Add Trade</button>
 
           {renderNotesSection("General Conditions", "generalConditions", result.scope_notes?.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
           {renderNotesSection("Exclusions", "exclusions", result.scope_notes?.exclusions, { updateNote, deleteNote, addNote })}

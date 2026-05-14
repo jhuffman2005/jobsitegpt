@@ -81,6 +81,19 @@ function computeTotalDays(tasks) {
   }, 0);
 }
 
+// Group tasks by phase order so newly-added tasks (and tasks whose phase was
+// just edited) sit with their siblings instead of dangling at the end of the
+// list. Stable secondary sort preserves the original order within each phase
+// — the AI's intra-phase ordering survives. Tasks whose phase isn't in the
+// phases array sink to the bottom (still grouped with each other).
+function sortTasksByPhase(tasks, phases) {
+  const order = new Map((phases || []).map((p, i) => [p, i]));
+  return tasks
+    .map((t, i) => ({ t, i, p: order.has(t.phase) ? order.get(t.phase) : Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => (a.p - b.p) || (a.i - b.i))
+    .map((x) => x.t);
+}
+
 // Build a runtime structured result by pulling the active schedule columns
 // from the project. Returns null when there's no schedule yet.
 async function loadActiveSchedule(projectId) {
@@ -392,7 +405,8 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   }, [dirty, generationId, result, inHistoryMode, activeProject?.id]);
 
   const applyTaskChange = (r, nextTasks) => {
-    const cascaded = cascadeSchedule(nextTasks);
+    const sorted = sortTasksByPhase(nextTasks, r.schedule_phases || []);
+    const cascaded = cascadeSchedule(sorted);
     return { ...r, schedule_tasks: cascaded, totalDays: computeTotalDays(cascaded) };
   };
 

@@ -4,7 +4,7 @@ import { useToast } from "../lib/hooks";
 import { ProcessingSteps, UploadZone, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
 import SendToTradesModal from "../components/SendToTradesModal";
-import { getProjectBidInvitations, getProjectTradeBids, getGenerations } from "../lib/projects";
+import { getProjectBidInvitations, getProjectTradeBids, getActiveScopeAsLegacy } from "../lib/projects";
 import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 
 const STEPS = [
@@ -32,9 +32,12 @@ export default function BidMatch({ activeProject, onProjectChange }) {
   const [invitations, setInvitations] = useState([]);     // bid_invitations rows
   const [loadingProjectData, setLoadingProjectData] = useState(false);
 
-  // Saved scopes for this project — the source of "what trades can I bid out?"
-  const [scopes, setScopes] = useState([]);
-  const [selectedScopeId, setSelectedScopeId] = useState(null);
+  // Live active scope (the project's scope_trades + scope_notes columns,
+  // flattened to legacy shape). This is the source of truth post-Prompt-1
+  // — every edit in ScopeGPT lands here, and the snapshot we send to a
+  // trade must reflect it. Reading from project_generations (historical
+  // record) used to be the bug — those rows are frozen at AI-output time.
+  const [activeScope, setActiveScope] = useState(null);
   const [selectedTrades, setSelectedTrades] = useState(new Set()); // tradeName
 
   // Send-to-trades modal state
@@ -42,13 +45,11 @@ export default function BidMatch({ activeProject, onProjectChange }) {
   const [tradesScope, setTradesScope] = useState(null); // scope filtered to checked trades
   const [tradeBranding, setTradeBranding] = useState(null);
 
-  // Pull saved scopes, invitations, and submitted bids for the active project.
   useEffect(() => {
     if (!activeProject?.id) {
       setSubmittedBids([]);
       setInvitations([]);
-      setScopes([]);
-      setSelectedScopeId(null);
+      setActiveScope(null);
       setSelectedTrades(new Set());
       return;
     }
@@ -57,33 +58,23 @@ export default function BidMatch({ activeProject, onProjectChange }) {
     Promise.all([
       getProjectBidInvitations(activeProject.id),
       getProjectTradeBids(activeProject.id),
-      getGenerations(activeProject.id),
+      getActiveScopeAsLegacy(activeProject.id),
     ])
-      .then(([invs, bids, gens]) => {
+      .then(([invs, bids, scope]) => {
         if (cancelled) return;
         setInvitations(invs);
         setSubmittedBids(bids);
-        const scopeGens = (gens || []).filter((g) => g.tool === "ScopeGPT" && g.result_data?.trades?.length);
-        setScopes(scopeGens);
-        // Auto-select the most recent scope so the GC lands on something useful
-        if (scopeGens.length && !selectedScopeId) {
-          setSelectedScopeId(scopeGens[0].id);
-        }
+        setActiveScope(scope);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoadingProjectData(false); });
     return () => { cancelled = true; };
   }, [activeProject?.id, status]);
 
-  const activeScope = useMemo(
-    () => scopes.find((s) => s.id === selectedScopeId)?.result_data || null,
-    [scopes, selectedScopeId]
-  );
-
-  // When the user changes the scope, reset trade selection
+  // Reset trade selection if the underlying scope changes (e.g. project switch).
   useEffect(() => {
     setSelectedTrades(new Set());
-  }, [selectedScopeId]);
+  }, [activeScope?.projectName, activeProject?.id]);
 
   // Branding for trade emails — load lazily once when the modal first opens
   useEffect(() => {
@@ -123,13 +114,13 @@ export default function BidMatch({ activeProject, onProjectChange }) {
     const trade = activeScope.trades.find((t) => t.tradeName === row.tradeName);
     if (!trade) throw new Error("Trade not found in scope");
     return sendTradeInvitation({
-      scope: activeScope,
+      scope: activeScope, // legacy shape from getActiveScopeAsLegacy — buildLegacyTradeSnapshot passes it through
       trade: { ...trade, contractor: row.contractor || trade.contractor },
       contactName: row.contactName,
       email: row.email,
       branding: tradeBranding || {},
       projectId: activeProject?.id || null,
-      generationId: selectedScopeId,
+      generationId: null, // no longer tied to a specific historical generation
     });
   };
 
@@ -273,9 +264,6 @@ export default function BidMatch({ activeProject, onProjectChange }) {
       {(status === "idle" || status === "error") && activeProject?.id && (
         <BidOutScopePanel
           loading={loadingProjectData}
-          scopes={scopes}
-          selectedScopeId={selectedScopeId}
-          onSelectScope={setSelectedScopeId}
           activeScope={activeScope}
           selectedTrades={selectedTrades}
           tradeStatus={tradeStatus}
@@ -421,24 +409,27 @@ export default function BidMatch({ activeProject, onProjectChange }) {
   );
 }
 
-// Bid out a scope: pick a saved scope from the project, check trades, send.
+// Bid out the project's live scope: check trades, send. The scope itself
+// comes from getActiveScopeAsLegacy (the projects.scope_trades / scope_notes
+// columns flattened to legacy shape), so what gets sent reflects current
+// edits — not a frozen AI generation.
 function BidOutScopePanel({
-  loading, scopes, selectedScopeId, onSelectScope, activeScope,
+  loading, activeScope,
   selectedTrades, tradeStatus, onToggleTrade, onToggleAllTrades, onSendSelected,
 }) {
-  if (loading && scopes.length === 0) {
+  if (loading && !activeScope) {
     return (
       <div style={hubPanelStyle}>
-        <div style={{ fontSize: 12, color: "#909ab0" }}>Loading project scopes…</div>
+        <div style={{ fontSize: 12, color: "#909ab0" }}>Loading project scope…</div>
       </div>
     );
   }
-  if (!scopes.length) {
+  if (!activeScope) {
     return (
       <div style={hubPanelStyle}>
         <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e", marginBottom: 4 }}>📤 Bid Out a Scope</div>
         <div style={{ fontSize: 12, color: "#606880", lineHeight: 1.6 }}>
-          No saved scopes yet for this project. Generate one in <a href="/scope" style={{ color: "#f0a500", textDecoration: "none" }}>ScopeGPT</a> first — its trade breakdown is what gets bid out.
+          No scope yet for this project. Generate one in <a href="/scope" style={{ color: "#f0a500", textDecoration: "none" }}>ScopeGPT</a> first — its trade breakdown is what gets bid out.
         </div>
       </div>
     );
@@ -453,7 +444,7 @@ function BidOutScopePanel({
         <div>
           <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#1a1f2e" }}>📤 Bid Out a Scope</div>
           <div style={{ fontSize: 12, color: "#606880", marginTop: 2 }}>
-            Pick a scope, check the trades you want bids on, send them their scope.
+            {activeScope.projectName ? `${activeScope.projectName} · ` : ""}check the trades you want bids on, send them their scope.
           </div>
         </div>
         <button
@@ -464,21 +455,6 @@ function BidOutScopePanel({
           ✉ Send to {selectedTrades.size || "Selected"} Trade{selectedTrades.size === 1 ? "" : "s"}
         </button>
       </div>
-
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#606880", marginBottom: 6, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-        Scope
-      </label>
-      <select
-        value={selectedScopeId || ""}
-        onChange={(e) => onSelectScope(e.target.value)}
-        style={{ width: "100%", marginBottom: 16 }}
-      >
-        {scopes.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.title || s.result_data?.projectName || "Untitled scope"} · {s.result_data?.trades?.length || 0} trades · {new Date(s.created_at).toLocaleDateString()}
-          </option>
-        ))}
-      </select>
 
       {activeScope && (
         <>
