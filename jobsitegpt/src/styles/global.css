@@ -579,13 +579,84 @@ select {
 }
 .add-line-btn:hover { border-color: #f0a500; color: #c47f00; background: rgba(240,165,0,0.04); }
 
-/* User-added items get a blue left accent so they're distinguishable from
-   AI-generated content at a glance. Box-shadow inset avoids layout shift. */
+/* Origin accents. Three states; box-shadow inset to avoid layout shift.
+     ai_generated → no class, no accent
+     user_added   → blue
+     uploaded     → green */
 .user-added { box-shadow: inset 3px 0 0 #4a90e2; }
+.uploaded   { box-shadow: inset 3px 0 0 #27ae60; }
 .line-item.user-added,
-.notes-item.user-added { padding-left: 8px; }
+.line-item.uploaded,
+.notes-item.user-added,
+.notes-item.uploaded { padding-left: 8px; }
 .gantt-table tr.user-added > td:first-child,
 .gantt-table tr.user-added > td:first-child + td { box-shadow: inset 3px 0 0 #4a90e2; }
+.gantt-table tr.uploaded > td:first-child,
+.gantt-table tr.uploaded > td:first-child + td { box-shadow: inset 3px 0 0 #27ae60; }
+
+/* Scope/Schedule upload card (project setup). Subdued styling — sidecar,
+   not the primary path. Lives in ProjectDetail.jsx via ScopeOrScheduleUpload. */
+.upload-import-card {
+  background: #ffffff;
+  border: 1.5px solid #e0e4ef;
+  border-radius: 8px;
+  padding: 18px 22px;
+  margin-bottom: 14px;
+}
+.upload-import-title {
+  font-family: 'Inter', sans-serif; font-weight: 700; font-size: 14px;
+  color: #1a1f2e; display: flex; align-items: center; gap: 10px;
+}
+.upload-import-optional {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #909ab0; padding: 2px 8px; background: #f0f2f5; border-radius: 10px;
+}
+.upload-import-desc { font-size: 12px; color: #606880; line-height: 1.55; margin: 6px 0 14px; }
+.upload-source-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f8f9fc; border: 1px solid #e0e4ef; border-radius: 6px; }
+.upload-source-name { font-size: 13px; font-weight: 600; color: #1a1f2e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-source-meta { font-size: 11px; color: #909ab0; margin-top: 2px; }
+.upload-pick-btn { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-right: 10px; }
+.upload-paste-toggle { font-size: 12px; }
+.upload-paste-area { display: block; width: 100%; min-height: 110px; margin-top: 12px; padding: 10px 12px; border: 1px solid #d0d4dc; border-radius: 6px; font-family: inherit; font-size: 13px; box-sizing: border-box; }
+.upload-actions-row { display: flex; gap: 10px; margin-top: 14px; align-items: center; }
+.upload-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.upload-path-card {
+  text-align: left; background: #f8f9fc; border: 1.5px solid #e0e4ef; border-radius: 8px;
+  padding: 14px 16px; cursor: pointer; transition: all 0.15s; font-family: inherit;
+}
+.upload-path-card:hover { border-color: #f0a500; background: rgba(240,165,0,0.04); }
+.upload-path-title { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px; color: #1a1f2e; margin-bottom: 6px; }
+.upload-path-desc { font-size: 12px; color: #606880; line-height: 1.55; }
+.upload-processing { padding: 24px 0; text-align: center; color: #606880; }
+.upload-spinner { font-size: 28px; margin-bottom: 8px; animation: pulse 1.4s ease-in-out infinite; }
+.upload-processing-sub { font-size: 11px; color: #909ab0; margin-top: 4px; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.upload-preview-pill {
+  display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 3px 10px; border-radius: 10px;
+  background: rgba(74,144,226,0.1); color: #4a90e2; margin-bottom: 10px;
+}
+.upload-preview-primary { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 15px; color: #1a1f2e; margin-bottom: 4px; }
+.upload-preview-secondary { font-size: 12px; color: #606880; }
+.upload-details { margin-top: 12px; }
+.upload-details summary { cursor: pointer; font-size: 12px; color: #606880; padding: 6px 0; }
+.upload-preview-list { padding: 10px 0; }
+.upload-preview-trade { margin-bottom: 12px; padding: 8px 12px; background: #f8f9fc; border: 1px solid #eef0f5; border-radius: 6px; }
+.upload-preview-trade-name { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 13px; color: #1a1f2e; }
+.upload-preview-trade-meta { font-size: 11px; color: #c47f00; margin-top: 2px; }
+.upload-preview-trade-text { font-size: 12px; color: #606880; line-height: 1.5; margin: 6px 0; }
+.upload-preview-li-list { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: #1a1f2e; }
+.upload-preview-li-list li { margin-bottom: 2px; line-height: 1.5; }
+.upload-preview-notes { margin-bottom: 10px; }
+.upload-preview-notes-title { font-family: 'Inter', sans-serif; font-weight: 700; font-size: 11px; color: #606880; letter-spacing: 0.06em; text-transform: uppercase; }
+.upload-preview-phases { font-size: 12px; color: #606880; margin-bottom: 12px; }
+.upload-preview-tasks { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
+.upload-preview-tasks th, .upload-preview-tasks td { padding: 5px 8px; border-bottom: 1px solid #eef0f5; text-align: left; vertical-align: top; }
+.upload-preview-tasks th { background: #f7f8fb; color: #606880; font-weight: 700; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.upload-error { padding: 6px 0; }
+.upload-error-msg { font-size: 13px; color: #e74c3c; margin-bottom: 8px; }
+.upload-error-fallback { font-size: 12px; color: #606880; line-height: 1.55; margin: 10px 0; }
+.upload-raw-pre { font-size: 11px; background: #f8f9fc; border: 1px solid #e0e4ef; padding: 10px 12px; border-radius: 6px; overflow: auto; max-height: 200px; }
 
 /* Editable table rows (ScheduleGPT) */
 .gantt-table td .edit-input,
