@@ -417,6 +417,24 @@ export async function getActiveScopeAsLegacy(projectId) {
   };
 }
 
+export async function setScopeLocked(projectId, locked) {
+  if (!projectId) return;
+  const { error } = await supabase
+    .from("projects")
+    .update({ scope_locked: !!locked, updated_at: new Date().toISOString() })
+    .eq("id", projectId);
+  if (error) throw error;
+}
+
+export async function setScheduleLocked(projectId, locked) {
+  if (!projectId) return;
+  const { error } = await supabase
+    .from("projects")
+    .update({ schedule_locked: !!locked, updated_at: new Date().toISOString() })
+    .eq("id", projectId);
+  if (error) throw error;
+}
+
 export async function saveActiveSchedule(projectId, { schedule_tasks, schedule_phases, schedule_subcontractors }) {
   if (!projectId) return;
   const { error } = await supabase

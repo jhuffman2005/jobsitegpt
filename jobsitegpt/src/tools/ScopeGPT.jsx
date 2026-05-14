@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, downloadDoc, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
 import {
-  getProjectFileAsBase64, saveGeneration, updateGeneration, getGenerationById,
+  getProjectFileAsBase64, saveGeneration, getGenerationById,
   getUserSettings, getProjectBidInvitations,
-  getProjectActiveScope, saveActiveScope,
+  getProjectActiveScope, saveActiveScope, setScopeLocked,
 } from "../lib/projects";
+import LockToggle from "../components/LockToggle";
 import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 import { loadLogoAttachment } from "../lib/companyLogo";
 import {
@@ -117,6 +118,17 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
 
+  // Lock state: mirrors projects.scope_locked. Active mode only — in history
+  // mode the toggle is hidden. Lock blocks AI regeneration; manual edits
+  // always work regardless of lock state.
+  const [locked, setLocked] = useState(false);
+  const [lockBusy, setLockBusy] = useState(false);
+
+  // Metadata for the historical generation when in history mode. Needed so
+  // Restore can target the right project even if activeProject isn't set
+  // (e.g. deep-linked /scope?historyId=…) and so we can show the timestamp.
+  const [historyMeta, setHistoryMeta] = useState(null); // { createdAt, projectId }
+
   const inHistoryMode = !!historyId;
 
   // On mount / project change: if we're in history mode, ?historyId hydration
@@ -153,6 +165,12 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
     let cancelled = false;
     (async () => {
+      // Always pull the lock state from the project record, even when there's
+      // no scope content yet (a fresh project can be pre-locked).
+      const raw = await getProjectActiveScope(activeProject.id);
+      if (cancelled) return;
+      setLocked(!!raw?.scope_locked);
+
       const active = await loadActiveScope(activeProject.id);
       if (cancelled) return;
       if (active) {
@@ -193,8 +211,11 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         setStatus("done");
         setError("");
         setGenerationId(g.id);
+        setHistoryMeta({ createdAt: g.created_at, projectId: g.project_id });
         setDirty(false);
-        persistResult(g.project_id ?? activeProject?.id, structured);
+        // Don't write the historical structured back into sessionStorage —
+        // back-button restore should land on the active scope, not the
+        // historical one. History view is its own context.
       }
     })();
     return () => { cancelled = true; };
@@ -340,10 +361,11 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     return lines.join("\n");
   };
 
-  // updateResult: persists locally and routes the save by mode. Active mode
-  // writes structured to projects.scope_*; history mode writes legacy back
-  // to project_generations (existing behavior).
+  // updateResult: in history mode it's a no-op — history view is read-only.
+  // Active mode mutates state and triggers the auto-save below (which writes
+  // structured to projects.scope_*).
   const updateResult = (updater) => {
+    if (inHistoryMode) return;
     setResult((prev) => {
       if (!prev) return prev;
       const next = updater(prev);
@@ -354,28 +376,20 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
   };
 
   const persistCurrent = async (current) => {
-    if (inHistoryMode && generationId) {
-      await updateGeneration(generationId, {
-        title: current.projectName,
-        summary: current.overview,
-        result_data: flattenStructuredScope(current),
-      });
-    } else if (activeProject?.id) {
-      await saveActiveScope(activeProject.id, {
-        scope_trades: current.scope_trades,
-        scope_notes: current.scope_notes,
-      });
-    }
+    // Active mode only. The history-mode write path that used to mutate
+    // project_generations.result_data has been removed — historical rows
+    // are immutable snapshots of AI output.
+    if (!activeProject?.id) return;
+    await saveActiveScope(activeProject.id, {
+      scope_trades: current.scope_trades,
+      scope_notes: current.scope_notes,
+    });
   };
 
   const saveChanges = async () => {
-    if (!result) return;
-    if (!inHistoryMode && !activeProject?.id) {
+    if (!result || inHistoryMode) return;
+    if (!activeProject?.id) {
       showToast("Select a project before saving");
-      return;
-    }
-    if (inHistoryMode && !generationId) {
-      showToast("No saved scope to update");
       return;
     }
     setSaving(true);
@@ -392,8 +406,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
   useEffect(() => {
     if (!dirty || !result) return;
-    if (inHistoryMode && !generationId) return;
-    if (!inHistoryMode && !activeProject?.id) return;
+    if (inHistoryMode) return; // history mode is read-only, no auto-save
+    if (!activeProject?.id) return;
     const timer = setTimeout(async () => {
       setSaving(true);
       try {
@@ -406,7 +420,80 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
       }
     }, 1200);
     return () => clearTimeout(timer);
-  }, [dirty, generationId, result, inHistoryMode, activeProject?.id]);
+  }, [dirty, result, inHistoryMode, activeProject?.id]);
+
+  // ── Lock toggle ──────────────────────────────────────────────────────────
+  const toggleLock = async () => {
+    if (!activeProject?.id || lockBusy) return;
+    if (locked) {
+      if (!window.confirm(
+        "Unlocking allows new AI generations to overwrite the current scope. Your current items stay until you regenerate. Continue?"
+      )) return;
+    }
+    setLockBusy(true);
+    try {
+      const next = !locked;
+      await setScopeLocked(activeProject.id, next);
+      setLocked(next);
+    } catch (e) {
+      showToast("Could not change lock: " + e.message);
+    } finally {
+      setLockBusy(false);
+    }
+  };
+
+  // ── Restore (history mode → active) ──────────────────────────────────────
+  const restore = async () => {
+    if (!result) return;
+    const projectId = historyMeta?.projectId || activeProject?.id;
+    if (!projectId) {
+      showToast("Cannot restore — no project context.");
+      return;
+    }
+    // Re-fetch current active lock state so we don't act on stale info.
+    let activeLocked = false;
+    try {
+      const raw = await getProjectActiveScope(projectId);
+      activeLocked = !!raw?.scope_locked;
+    } catch {}
+
+    const confirmMsg = activeLocked
+      ? "The active scope is locked. Restoring this version will replace it. Unlock and restore?"
+      : "Restore this version? It will replace your current active scope.";
+    if (!window.confirm(confirmMsg)) return;
+
+    // Round-trip through legacy → structured to guarantee fresh UUIDs and
+    // reset completion state (per spec: a restore starts the scope's life
+    // over — historical completion flags must not carry through).
+    const fresh = ensureStructuredScope(flattenStructuredScope(result));
+    setSaving(true);
+    try {
+      await saveActiveScope(projectId, {
+        scope_trades: fresh.scope_trades,
+        scope_notes: fresh.scope_notes,
+      });
+      if (activeLocked) {
+        await setScopeLocked(projectId, false);
+      }
+      setLocked(false);
+      // Drop ?historyId so the next render lands in active mode. Also
+      // mirror the restored state into local result + sessionStorage so the
+      // view doesn't flicker through "loading active".
+      setResult(fresh);
+      setGenerationId(null);
+      setHistoryMeta(null);
+      setDirty(false);
+      persistResult(projectId, fresh);
+      const p = new URLSearchParams(searchParams);
+      p.delete("historyId");
+      setSearchParams(p, { replace: true });
+      showToast("Restored — now editable as the active scope.");
+    } catch (e) {
+      showToast("Restore failed: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateTrade = (tradeId, field, value) =>
     updateResult((r) => ({
@@ -656,9 +743,44 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     });
   };
 
+  const historyTimestamp = useMemo(() => {
+    if (!historyMeta?.createdAt) return "";
+    try { return new Date(historyMeta.createdAt).toLocaleString(); } catch { return ""; }
+  }, [historyMeta]);
+
   return (
-    <div className="fade-up">
-      <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
+    <div className={`fade-up${inHistoryMode ? " tool-readonly" : ""}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ProjectSwitcher activeProject={activeProject} onProjectChange={onProjectChange} />
+        </div>
+        {!inHistoryMode && activeProject?.id && (
+          <LockToggle locked={locked} onToggle={toggleLock} disabled={lockBusy} />
+        )}
+      </div>
+
+      {inHistoryMode && (
+        <div className="history-banner">
+          <div className="history-banner-text">
+            <div className="history-banner-title">👁 Viewing a saved version (read-only)</div>
+            {historyTimestamp && <div className="history-banner-meta">{historyTimestamp}</div>}
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={restore}
+            disabled={saving || !result}
+          >
+            {saving ? "Restoring…" : "↻ Restore This Version"}
+          </button>
+        </div>
+      )}
+
+      {locked && !inHistoryMode && (
+        <div className="locked-banner">
+          🔒 This scope is locked as the project source of truth.
+        </div>
+      )}
 
       {(status === "idle" || status === "error") && (
         <>
@@ -708,7 +830,12 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
           <SpecialInstructions value={specialInstructions} onChange={setSpecialInstructions} />
 
           {error && <div className="error-box">⚠ {error}</div>}
-          <button className="btn btn-primary btn-lg" disabled={!projName.trim()} onClick={generate}>
+          <button
+            className="btn btn-primary btn-lg"
+            disabled={!projName.trim() || locked}
+            title={locked ? "Unlock to regenerate" : undefined}
+            onClick={generate}
+          >
             ⚡ Generate Scope of Work
           </button>
         </>
@@ -727,34 +854,40 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
               <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
               <button className="btn" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ .txt</button>
               <button className="btn" onClick={() => { navigator.clipboard.writeText(toText(result)); showToast("Copied!"); }}>⧉ Copy</button>
-              <button
-                className="btn"
-                style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
-                disabled={saving || !dirty}
-                onClick={saveChanges}
-              >
-                {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
-              </button>
-              <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
-              <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.scope_trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
-              <button className="btn btn-ghost" onClick={reset}>↩ New Scope</button>
+              {!inHistoryMode && (
+                <>
+                  <button
+                    className="btn"
+                    style={{ borderColor: dirty ? "#f0a500" : "rgba(240,165,0,0.3)", color: dirty ? "#c47f00" : "#909ab0" }}
+                    disabled={saving || !dirty}
+                    onClick={saveChanges}
+                  >
+                    {saving ? "Saving…" : dirty ? "💾 Save Changes" : "✓ Saved"}
+                  </button>
+                  <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
+                  <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.scope_trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
+                  <button className="btn btn-ghost" onClick={reset}>↩ New Scope</button>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="handoff-banner">
-            <div style={{ fontSize: 22 }}>📅</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to build the schedule?</div>
-              <div style={{ fontSize: 12, color: "#606880" }}>Scope data passes automatically — no download needed.</div>
+          {!inHistoryMode && (
+            <div className="handoff-banner">
+              <div style={{ fontSize: 22 }}>📅</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Inter',sans-serif", fontWeight: 700, fontSize: 14, color: "#4a90e2", marginBottom: 3 }}>Ready to build the schedule?</div>
+                <div style={{ fontSize: 12, color: "#606880" }}>Scope data passes automatically — no download needed.</div>
+              </div>
+              <button
+                className="btn"
+                style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }}
+                onClick={goToSchedule}
+              >
+                Open ScheduleGPT →
+              </button>
             </div>
-            <button
-              className="btn"
-              style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }}
-              onClick={goToSchedule}
-            >
-              Open ScheduleGPT →
-            </button>
-          </div>
+          )}
 
           <div className="section-label">Scope by Trade</div>
           {(result.scope_trades || []).map((t, idx) => (
@@ -766,19 +899,23 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                   style={{ flex: 1, fontWeight: 700, fontSize: 16, letterSpacing: "0.04em", color: "#1a1f2e" }}
                   value={t.tradeName}
                   onChange={(e) => updateTrade(t.id, "tradeName", e.target.value)}
+                  readOnly={inHistoryMode}
                 />
                 <input
                   className="edit-input"
                   style={{ width: 160, fontSize: 11, color: "#c47f00", textAlign: "center" }}
                   value={t.contractor}
                   onChange={(e) => updateTrade(t.id, "contractor", e.target.value)}
+                  readOnly={inHistoryMode}
                 />
-                <button
-                  type="button"
-                  className="delete-icon-btn"
-                  title="Delete trade"
-                  onClick={() => deleteTrade(t.id)}
-                >🗑</button>
+                {!inHistoryMode && (
+                  <button
+                    type="button"
+                    className="delete-icon-btn"
+                    title="Delete trade"
+                    onClick={() => deleteTrade(t.id)}
+                  >🗑</button>
+                )}
               </div>
               <div className="trade-body">
                 <textarea
@@ -786,6 +923,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                   style={{ fontSize: 13, lineHeight: 1.7, color: "#1a1f2e", marginBottom: 12 }}
                   value={t.scopeText}
                   onChange={(e) => updateTrade(t.id, "scopeText", e.target.value)}
+                  readOnly={inHistoryMode}
                 />
                 <div className="line-items">
                   {(t.lineItems || []).map((li) => (
@@ -797,6 +935,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                           style={{ fontSize: 13 }}
                           value={li.description}
                           onChange={(e) => updateLineItem(t.id, li.id, "description", e.target.value)}
+                          readOnly={inHistoryMode}
                           placeholder="Line item description"
                         />
                         <input
@@ -805,35 +944,46 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                           value={li.note || ""}
                           onChange={(e) => updateLineItem(t.id, li.id, "note", e.target.value || null)}
                           placeholder="Optional note"
+                          readOnly={inHistoryMode}
                         />
                       </div>
-                      <button
-                        type="button"
-                        className="delete-icon-btn"
-                        title="Delete line"
-                        onClick={() => deleteLineItem(t.id, li.id)}
-                      >🗑</button>
+                      {!inHistoryMode && (
+                        <button
+                          type="button"
+                          className="delete-icon-btn"
+                          title="Delete line"
+                          onClick={() => deleteLineItem(t.id, li.id)}
+                        >🗑</button>
+                      )}
                     </div>
                   ))}
                 </div>
-                <button type="button" className="add-line-btn" onClick={() => addLineItem(t.id)}>＋ Add Line</button>
+                {!inHistoryMode && (
+                  <button type="button" className="add-line-btn" onClick={() => addLineItem(t.id)}>＋ Add Line</button>
+                )}
               </div>
             </div>
           ))}
 
-          <button type="button" className="add-line-btn" style={{ marginBottom: 14 }} onClick={addTrade}>＋ Add Trade</button>
+          {!inHistoryMode && (
+            <button type="button" className="add-line-btn" style={{ marginBottom: 14 }} onClick={addTrade}>＋ Add Trade</button>
+          )}
 
-          {renderNotesSection("General Conditions", "generalConditions", result.scope_notes?.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
-          {renderNotesSection("Exclusions", "exclusions", result.scope_notes?.exclusions, { updateNote, deleteNote, addNote })}
-          {renderNotesSection("Clarifications", "clarifications", result.scope_notes?.clarifications, { updateNote, deleteNote, addNote })}
+          {renderNotesSection("General Conditions", "generalConditions", result.scope_notes?.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote, readOnly: inHistoryMode })}
+          {renderNotesSection("Exclusions", "exclusions", result.scope_notes?.exclusions, { updateNote, deleteNote, addNote, readOnly: inHistoryMode })}
+          {renderNotesSection("Clarifications", "clarifications", result.scope_notes?.clarifications, { updateNote, deleteNote, addNote, readOnly: inHistoryMode })}
 
           <div className="result-actions" style={{ marginTop: 24 }}>
             <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
             <button className="btn" onClick={() => downloadTxt(`${result.projectName.replace(/\s+/g, "_")}_Scope.txt`, toText(result))}>⬇ .txt</button>
-            <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
-            <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.scope_trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
-            <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={goToSchedule}>📅 Open in ScheduleGPT</button>
-            <button className="btn btn-ghost" onClick={reset}>↩ Start Over</button>
+            {!inHistoryMode && (
+              <>
+                <button className="btn" style={{ borderColor: "rgba(39,174,96,0.3)", color: "#27ae60" }} onClick={() => setSendOpen(true)}>✉ Send to Client</button>
+                <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} disabled={!result?.scope_trades?.length} onClick={openSendToTrades}>📤 Send to Trades</button>
+                <button className="btn" style={{ borderColor: "rgba(74,144,226,0.3)", color: "#4a90e2" }} onClick={goToSchedule}>📅 Open in ScheduleGPT</button>
+                <button className="btn btn-ghost" onClick={reset}>↩ Start Over</button>
+              </>
+            )}
           </div>
         </>
       )}
@@ -858,7 +1008,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 }
 
 function renderNotesSection(title, field, items, helpers) {
-  const { updateNote, deleteNote, addNote, topMargin } = helpers;
+  const { updateNote, deleteNote, addNote, topMargin, readOnly } = helpers;
   const list = items || [];
   return (
     <>
@@ -873,18 +1023,23 @@ function renderNotesSection(title, field, items, helpers) {
                   value={item.text}
                   onChange={(e) => updateNote(field, item.id, e.target.value)}
                   placeholder={`${title.slice(0, -1)}…`}
+                  readOnly={readOnly}
                 />
               </div>
-              <button
-                type="button"
-                className="delete-icon-btn"
-                title="Delete"
-                onClick={() => deleteNote(field, item.id)}
-              >🗑</button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  className="delete-icon-btn"
+                  title="Delete"
+                  onClick={() => deleteNote(field, item.id)}
+                >🗑</button>
+              )}
             </div>
           ))}
         </div>
-        <button type="button" className="add-line-btn" onClick={() => addNote(field)}>＋ Add Line</button>
+        {!readOnly && (
+          <button type="button" className="add-line-btn" onClick={() => addNote(field)}>＋ Add Line</button>
+        )}
       </div>
     </>
   );
