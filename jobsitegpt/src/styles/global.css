@@ -579,6 +579,36 @@ select {
 }
 .add-line-btn:hover { border-color: #f0a500; color: #c47f00; background: rgba(240,165,0,0.04); }
 
+/* User-added items get a blue left accent so they're distinguishable from
+   AI-generated content at a glance. Box-shadow inset avoids layout shift. */
+.user-added { box-shadow: inset 3px 0 0 #4a90e2; }
+.line-item.user-added,
+.notes-item.user-added { padding-left: 8px; }
+.gantt-table tr.user-added > td:first-child,
+.gantt-table tr.user-added > td:first-child + td { box-shadow: inset 3px 0 0 #4a90e2; }
+
+/* Inline new-trade form: appears below the last trade when "+ Add Trade"
+   is clicked. Three fields + Save/Cancel. Mirrors trade-block styling so
+   it reads as "this is what the saved trade will look like". */
+.new-trade-form {
+  background: #ffffff;
+  border: 1.5px dashed #b8c2d9;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.new-trade-form .field-row { display: flex; gap: 10px; }
+.new-trade-form .field-row > * { flex: 1; }
+.new-trade-form textarea { min-height: 60px; }
+.new-trade-form .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.field-required {
+  border-color: #e74c3c !important;
+  box-shadow: 0 0 0 2px rgba(231,76,60,0.12) !important;
+}
+
 /* Editable table rows (ScheduleGPT) */
 .gantt-table td .edit-input,
 .sub-table td .edit-input { padding: 3px 5px; font-size: 12px; }

@@ -398,13 +398,22 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
   const updateTask = (taskId, field, value) =>
     updateResult((r) => applyTaskChange(r, (r.schedule_tasks || []).map((t) => t.id === taskId ? { ...t, [field]: value } : t)));
-  const deleteTask = (taskId) =>
+  const deleteTask = (taskId) => {
+    const tasks = result?.schedule_tasks || [];
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const dependents = tasks.filter((t) => (t.dependencies || []).includes(taskId));
+    const msg = dependents.length > 0
+      ? `${dependents.length} other task${dependents.length === 1 ? "" : "s"} depend on "${target.task || "this task"}". Deleting will remove ${dependents.length === 1 ? "that dependency" : "those dependencies"}. Continue?`
+      : "Delete this task?";
+    if (!window.confirm(msg)) return;
     updateResult((r) => {
       const filtered = (r.schedule_tasks || [])
         .filter((t) => t.id !== taskId)
         .map((t) => ({ ...t, dependencies: (t.dependencies || []).filter((d) => d !== taskId) }));
       return applyTaskChange(r, filtered);
     });
+  };
   const addTask = () => {
     updateResult((r) => {
       const defaultPhase = r.schedule_phases?.[0] || "";
@@ -650,7 +659,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                 {(result.schedule_tasks || []).map((t, idx) => {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
-                    <tr key={t.id}>
+                    <tr key={t.id} className={t.origin === "user_added" ? "user-added" : undefined}>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{idx + 1}</td>
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}

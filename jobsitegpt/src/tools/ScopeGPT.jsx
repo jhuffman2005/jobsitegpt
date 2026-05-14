@@ -10,7 +10,8 @@ import {
 import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 import { loadLogoAttachment } from "../lib/companyLogo";
 import {
-  ensureStructuredScope, flattenStructuredScope, makeBlankLineItem, makeBlankNoteItem,
+  ensureStructuredScope, flattenStructuredScope,
+  makeBlankLineItem, makeBlankNoteItem, makeBlankTrade,
 } from "../lib/structuredData";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
@@ -115,6 +116,12 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
   const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
+
+  // Inline "+ Add Trade" form state. Stays collapsed until clicked; saves
+  // append a structured trade with origin: "user_added" to scope_trades.
+  const [newTradeOpen, setNewTradeOpen] = useState(false);
+  const [newTradeFields, setNewTradeFields] = useState({ tradeName: "", contractor: "", scopeText: "" });
+  const [newTradeError, setNewTradeError] = useState(false);
 
   const inHistoryMode = !!historyId;
 
@@ -419,13 +426,15 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         ? { ...t, lineItems: t.lineItems.map((li) => li.id === lineItemId ? { ...li, [field]: value } : li) }
         : t),
     }));
-  const deleteLineItem = (tradeId, lineItemId) =>
+  const deleteLineItem = (tradeId, lineItemId) => {
+    if (!window.confirm("Delete this line item?")) return;
     updateResult((r) => ({
       ...r,
       scope_trades: r.scope_trades.map((t) => t.id === tradeId
         ? { ...t, lineItems: t.lineItems.filter((li) => li.id !== lineItemId) }
         : t),
     }));
+  };
   const addLineItem = (tradeId) =>
     updateResult((r) => ({
       ...r,
@@ -433,6 +442,56 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         ? { ...t, lineItems: [...(t.lineItems || []), makeBlankLineItem("user_added")] }
         : t),
     }));
+
+  const deleteTrade = (tradeId) => {
+    const target = (result?.scope_trades || []).find((t) => t.id === tradeId);
+    if (!target) return;
+    const lineCount = target.lineItems?.length || 0;
+    const msg = lineCount > 0
+      ? `Delete the "${target.tradeName || "untitled"}" trade and all ${lineCount} line item${lineCount === 1 ? "" : "s"}? This cannot be undone.`
+      : `Delete the "${target.tradeName || "untitled"}" trade? This cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    updateResult((r) => ({
+      ...r,
+      scope_trades: (r.scope_trades || []).filter((t) => t.id !== tradeId),
+    }));
+  };
+
+  const openNewTrade = () => {
+    setNewTradeFields({ tradeName: "", contractor: "", scopeText: "" });
+    setNewTradeError(false);
+    setNewTradeOpen(true);
+  };
+  const cancelNewTrade = () => {
+    setNewTradeFields({ tradeName: "", contractor: "", scopeText: "" });
+    setNewTradeError(false);
+    setNewTradeOpen(false);
+  };
+  const saveNewTrade = () => {
+    if (!newTradeFields.tradeName.trim()) {
+      setNewTradeError(true);
+      return;
+    }
+    const trade = makeBlankTrade({
+      tradeName: newTradeFields.tradeName.trim(),
+      contractor: newTradeFields.contractor.trim(),
+      scopeText: newTradeFields.scopeText.trim(),
+    });
+    updateResult((r) => ({
+      ...r,
+      scope_trades: [...(r.scope_trades || []), trade],
+    }));
+    cancelNewTrade();
+  };
+  const onNewTradeKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && e.target.tagName !== "TEXTAREA") {
+      e.preventDefault();
+      saveNewTrade();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      cancelNewTrade();
+    }
+  };
 
   const updateNote = (field, itemId, value) =>
     updateResult((r) => ({
@@ -442,7 +501,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         [field]: (r.scope_notes?.[field] || []).map((x) => x.id === itemId ? { ...x, text: value } : x),
       },
     }));
-  const deleteNote = (field, itemId) =>
+  const deleteNote = (field, itemId) => {
+    if (!window.confirm("Delete this item?")) return;
     updateResult((r) => ({
       ...r,
       scope_notes: {
@@ -450,6 +510,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         [field]: (r.scope_notes?.[field] || []).filter((x) => x.id !== itemId),
       },
     }));
+  };
   const addNote = (field) =>
     updateResult((r) => ({
       ...r,
@@ -726,8 +787,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
           <div className="section-label">Scope by Trade</div>
           {(result.scope_trades || []).map((t, idx) => (
-            <div key={t.id} className="trade-block">
-              <div className="trade-header">
+            <div key={t.id} className={`trade-block${t.origin === "user_added" ? " user-added" : ""}`}>
+              <div className="trade-header editable-row">
                 <span className="trade-num">#{String(idx + 1).padStart(2, "0")}</span>
                 <input
                   className="edit-input"
@@ -741,6 +802,12 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                   value={t.contractor}
                   onChange={(e) => updateTrade(t.id, "contractor", e.target.value)}
                 />
+                <button
+                  type="button"
+                  className="delete-icon-btn"
+                  title="Delete trade"
+                  onClick={() => deleteTrade(t.id)}
+                >🗑</button>
               </div>
               <div className="trade-body">
                 <textarea
@@ -751,7 +818,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                 />
                 <div className="line-items">
                   {(t.lineItems || []).map((li) => (
-                    <div key={li.id} className="line-item editable-row">
+                    <div key={li.id} className={`line-item editable-row${li.origin === "user_added" ? " user-added" : ""}`}>
                       <span className="line-bullet">▸</span>
                       <div className="edit-body">
                         <input
@@ -782,6 +849,38 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
               </div>
             </div>
           ))}
+
+          {newTradeOpen ? (
+            <div className="new-trade-form" onKeyDown={onNewTradeKey}>
+              <input
+                className={`edit-input${newTradeError && !newTradeFields.tradeName.trim() ? " field-required" : ""}`}
+                style={{ fontWeight: 700, fontSize: 16 }}
+                placeholder="Trade name (required) — e.g. Electrical"
+                value={newTradeFields.tradeName}
+                onChange={(e) => setNewTradeFields((f) => ({ ...f, tradeName: e.target.value }))}
+                autoFocus
+              />
+              <input
+                className="edit-input"
+                style={{ fontSize: 12 }}
+                placeholder="Contractor (optional)"
+                value={newTradeFields.contractor}
+                onChange={(e) => setNewTradeFields((f) => ({ ...f, contractor: e.target.value }))}
+              />
+              <textarea
+                className="edit-textarea"
+                placeholder="Scope description (optional)"
+                value={newTradeFields.scopeText}
+                onChange={(e) => setNewTradeFields((f) => ({ ...f, scopeText: e.target.value }))}
+              />
+              <div className="form-actions">
+                <button type="button" className="btn btn-ghost" onClick={cancelNewTrade}>Cancel</button>
+                <button type="button" className="btn btn-primary" onClick={saveNewTrade}>Save Trade</button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="add-line-btn" style={{ marginBottom: 14 }} onClick={openNewTrade}>＋ Add Trade</button>
+          )}
 
           {renderNotesSection("General Conditions", "generalConditions", result.scope_notes?.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
           {renderNotesSection("Exclusions", "exclusions", result.scope_notes?.exclusions, { updateNote, deleteNote, addNote })}
@@ -826,7 +925,7 @@ function renderNotesSection(title, field, items, helpers) {
       <div className="notes-block">
         <div className="notes-list">
           {list.map((item) => (
-            <div key={item.id} className="notes-item editable-row" style={{ display: "flex" }}>
+            <div key={item.id} className={`notes-item editable-row${item.origin === "user_added" ? " user-added" : ""}`} style={{ display: "flex" }}>
               <div className="edit-body" style={{ flex: 1 }}>
                 <input
                   className="edit-input"
