@@ -361,6 +361,62 @@ export async function saveActiveScope(projectId, { scope_trades, scope_notes }) 
   if (error) throw error;
 }
 
+// Returns the project's live scope (scope_trades + scope_notes) as a
+// LEGACY-SHAPED object: { projectName, trades, generalConditions, ... }.
+// Header metadata (projectName, overview, etc.) is pulled from the most
+// recent ScopeGPT generation since it doesn't live on the active columns.
+// Use this anywhere downstream code wants the live scope in legacy shape —
+// notably BidMatch and any flow that builds a bid_invitations.scope_snapshot.
+export async function getActiveScopeAsLegacy(projectId) {
+  if (!projectId) return null;
+  const active = await getProjectActiveScope(projectId);
+  if (!active?.scope_trades) return null;
+
+  let meta = {};
+  try {
+    const { data } = await supabase
+      .from("project_generations")
+      .select("result_data")
+      .eq("project_id", projectId)
+      .eq("tool", "ScopeGPT")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (data?.result_data) {
+      meta = {
+        projectName: data.result_data.projectName ?? "",
+        projectType: data.result_data.projectType ?? "",
+        projectAddress: data.result_data.projectAddress ?? null,
+        overview: data.result_data.overview ?? "",
+        estimatedDuration: data.result_data.estimatedDuration ?? "",
+      };
+    }
+  } catch {}
+
+  const noteText = (arr) => (arr || []).map((n) => (typeof n === "string" ? n : (n?.text ?? "")));
+  return {
+    projectName: meta.projectName || "",
+    projectType: meta.projectType || "",
+    projectAddress: meta.projectAddress ?? null,
+    overview: meta.overview || "",
+    estimatedDuration: meta.estimatedDuration || "",
+    totalLineItemCount: (active.scope_trades || []).reduce((n, t) => n + (t?.lineItems?.length || 0), 0),
+    trades: (active.scope_trades || []).map((t, i) => ({
+      id: i + 1,
+      tradeName: t.tradeName ?? "",
+      contractor: t.contractor ?? "",
+      scopeText: t.scopeText ?? "",
+      lineItems: (t.lineItems || []).map((li) => ({
+        description: li.description ?? "",
+        note: li.note ?? null,
+      })),
+    })),
+    generalConditions: noteText(active.scope_notes?.generalConditions),
+    exclusions:        noteText(active.scope_notes?.exclusions),
+    clarifications:    noteText(active.scope_notes?.clarifications),
+  };
+}
+
 export async function saveActiveSchedule(projectId, { schedule_tasks, schedule_phases, schedule_subcontractors }) {
   if (!projectId) return;
   const { error } = await supabase

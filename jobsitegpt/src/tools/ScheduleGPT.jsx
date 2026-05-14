@@ -81,6 +81,19 @@ function computeTotalDays(tasks) {
   }, 0);
 }
 
+// Group tasks by phase order so newly-added tasks (and tasks whose phase was
+// just edited) sit with their siblings instead of dangling at the end of the
+// list. Stable secondary sort preserves the original order within each phase
+// — the AI's intra-phase ordering survives. Tasks whose phase isn't in the
+// phases array sink to the bottom (still grouped with each other).
+function sortTasksByPhase(tasks, phases) {
+  const order = new Map((phases || []).map((p, i) => [p, i]));
+  return tasks
+    .map((t, i) => ({ t, i, p: order.has(t.phase) ? order.get(t.phase) : Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => (a.p - b.p) || (a.i - b.i))
+    .map((x) => x.t);
+}
+
 // Build a runtime structured result by pulling the active schedule columns
 // from the project. Returns null when there's no schedule yet.
 async function loadActiveSchedule(projectId) {
@@ -392,19 +405,29 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   }, [dirty, generationId, result, inHistoryMode, activeProject?.id]);
 
   const applyTaskChange = (r, nextTasks) => {
-    const cascaded = cascadeSchedule(nextTasks);
+    const sorted = sortTasksByPhase(nextTasks, r.schedule_phases || []);
+    const cascaded = cascadeSchedule(sorted);
     return { ...r, schedule_tasks: cascaded, totalDays: computeTotalDays(cascaded) };
   };
 
   const updateTask = (taskId, field, value) =>
     updateResult((r) => applyTaskChange(r, (r.schedule_tasks || []).map((t) => t.id === taskId ? { ...t, [field]: value } : t)));
-  const deleteTask = (taskId) =>
+  const deleteTask = (taskId) => {
+    const tasks = result?.schedule_tasks || [];
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const dependents = tasks.filter((t) => (t.dependencies || []).includes(taskId));
+    const msg = dependents.length > 0
+      ? `${dependents.length} other task${dependents.length === 1 ? "" : "s"} depend on "${target.task || "this task"}". Deleting will remove ${dependents.length === 1 ? "that dependency" : "those dependencies"}. Continue?`
+      : "Delete this task?";
+    if (!window.confirm(msg)) return;
     updateResult((r) => {
       const filtered = (r.schedule_tasks || [])
         .filter((t) => t.id !== taskId)
         .map((t) => ({ ...t, dependencies: (t.dependencies || []).filter((d) => d !== taskId) }));
       return applyTaskChange(r, filtered);
     });
+  };
   const addTask = () => {
     updateResult((r) => {
       const defaultPhase = r.schedule_phases?.[0] || "";
@@ -650,7 +673,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                 {(result.schedule_tasks || []).map((t, idx) => {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
-                    <tr key={t.id}>
+                    <tr key={t.id} className={t.origin === "user_added" ? "user-added" : undefined}>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{idx + 1}</td>
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}

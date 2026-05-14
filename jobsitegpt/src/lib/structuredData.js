@@ -292,3 +292,14 @@ export function makeBlankTask({ phase = "" } = {}, origin = "user_added") {
     completed_by_log_id: null,
   };
 }
+
+export function makeBlankTrade({ tradeName = "", contractor = "", scopeText = "" } = {}, origin = "user_added") {
+  return {
+    id: newId(),
+    tradeName,
+    contractor,
+    scopeText,
+    origin,
+    lineItems: [],
+  };
+}

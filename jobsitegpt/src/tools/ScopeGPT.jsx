@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, downloadDoc, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
@@ -10,7 +10,8 @@ import {
 import { resolveBranding, sendTradeInvitation } from "../lib/tradeInvites";
 import { loadLogoAttachment } from "../lib/companyLogo";
 import {
-  ensureStructuredScope, flattenStructuredScope, makeBlankLineItem, makeBlankNoteItem,
+  ensureStructuredScope, flattenStructuredScope,
+  makeBlankLineItem, makeBlankNoteItem, makeBlankTrade,
 } from "../lib/structuredData";
 import { ProcessingSteps, UploadZone, ProjectFilePicker, SpecialInstructions } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
@@ -419,19 +420,44 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         ? { ...t, lineItems: t.lineItems.map((li) => li.id === lineItemId ? { ...li, [field]: value } : li) }
         : t),
     }));
-  const deleteLineItem = (tradeId, lineItemId) =>
+  const deleteLineItem = (tradeId, lineItemId) => {
+    if (!window.confirm("Delete this line item?")) return;
     updateResult((r) => ({
       ...r,
       scope_trades: r.scope_trades.map((t) => t.id === tradeId
         ? { ...t, lineItems: t.lineItems.filter((li) => li.id !== lineItemId) }
         : t),
     }));
+  };
   const addLineItem = (tradeId) =>
     updateResult((r) => ({
       ...r,
       scope_trades: r.scope_trades.map((t) => t.id === tradeId
         ? { ...t, lineItems: [...(t.lineItems || []), makeBlankLineItem("user_added")] }
         : t),
+    }));
+
+  const deleteTrade = (tradeId) => {
+    const target = (result?.scope_trades || []).find((t) => t.id === tradeId);
+    if (!target) return;
+    const lineCount = target.lineItems?.length || 0;
+    const msg = lineCount > 0
+      ? `Delete the "${target.tradeName || "untitled"}" trade and all ${lineCount} line item${lineCount === 1 ? "" : "s"}? This cannot be undone.`
+      : `Delete the "${target.tradeName || "untitled"}" trade? This cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    updateResult((r) => ({
+      ...r,
+      scope_trades: (r.scope_trades || []).filter((t) => t.id !== tradeId),
+    }));
+  };
+
+  // Append a blank user-added trade — same pattern as "+ Add Line" and
+  // "+ Add Task". The user types into the always-editable trade-header
+  // inputs after it appears. Auto-save persists.
+  const addTrade = () =>
+    updateResult((r) => ({
+      ...r,
+      scope_trades: [...(r.scope_trades || []), makeBlankTrade()],
     }));
 
   const updateNote = (field, itemId, value) =>
@@ -442,7 +468,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         [field]: (r.scope_notes?.[field] || []).map((x) => x.id === itemId ? { ...x, text: value } : x),
       },
     }));
-  const deleteNote = (field, itemId) =>
+  const deleteNote = (field, itemId) => {
+    if (!window.confirm("Delete this item?")) return;
     updateResult((r) => ({
       ...r,
       scope_notes: {
@@ -450,6 +477,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
         [field]: (r.scope_notes?.[field] || []).filter((x) => x.id !== itemId),
       },
     }));
+  };
   const addNote = (field) =>
     updateResult((r) => ({
       ...r,
@@ -605,10 +633,14 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
     return () => { cancelled = true; };
   }, [tradesOpen]);
 
-  // The modal expects legacy shape (it has been around since before this
-  // migration and reads scope.trades). We flatten here so the modal stays
-  // shape-agnostic.
-  const flatScopeForModal = result ? flattenStructuredScope(result) : null;
+  // The modal expects legacy shape (reads scope.trades). useMemo so the
+  // reference is stable across renders that don't change `result` — the
+  // modal's useEffect depends on `scope` identity and would otherwise reset
+  // typed-in emails when tradeBranding resolves async or auto-save fires.
+  const flatScopeForModal = useMemo(
+    () => result ? flattenStructuredScope(result) : null,
+    [result]
+  );
 
   const tradeSendHandler = (row) => {
     const trade = (result.scope_trades || []).find((t) => t.tradeName === row.tradeName);
@@ -726,8 +758,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
 
           <div className="section-label">Scope by Trade</div>
           {(result.scope_trades || []).map((t, idx) => (
-            <div key={t.id} className="trade-block">
-              <div className="trade-header">
+            <div key={t.id} className={`trade-block${t.origin === "user_added" ? " user-added" : ""}`}>
+              <div className="trade-header editable-row">
                 <span className="trade-num">#{String(idx + 1).padStart(2, "0")}</span>
                 <input
                   className="edit-input"
@@ -741,6 +773,12 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                   value={t.contractor}
                   onChange={(e) => updateTrade(t.id, "contractor", e.target.value)}
                 />
+                <button
+                  type="button"
+                  className="delete-icon-btn"
+                  title="Delete trade"
+                  onClick={() => deleteTrade(t.id)}
+                >🗑</button>
               </div>
               <div className="trade-body">
                 <textarea
@@ -751,7 +789,7 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                 />
                 <div className="line-items">
                   {(t.lineItems || []).map((li) => (
-                    <div key={li.id} className="line-item editable-row">
+                    <div key={li.id} className={`line-item editable-row${li.origin === "user_added" ? " user-added" : ""}`}>
                       <span className="line-bullet">▸</span>
                       <div className="edit-body">
                         <input
@@ -782,6 +820,8 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
               </div>
             </div>
           ))}
+
+          <button type="button" className="add-line-btn" style={{ marginBottom: 14 }} onClick={addTrade}>＋ Add Trade</button>
 
           {renderNotesSection("General Conditions", "generalConditions", result.scope_notes?.generalConditions, { topMargin: 22, updateNote, deleteNote, addNote })}
           {renderNotesSection("Exclusions", "exclusions", result.scope_notes?.exclusions, { updateNote, deleteNote, addNote })}
@@ -826,7 +866,7 @@ function renderNotesSection(title, field, items, helpers) {
       <div className="notes-block">
         <div className="notes-list">
           {list.map((item) => (
-            <div key={item.id} className="notes-item editable-row" style={{ display: "flex" }}>
+            <div key={item.id} className={`notes-item editable-row${item.origin === "user_added" ? " user-added" : ""}`} style={{ display: "flex" }}>
               <div className="edit-body" style={{ flex: 1 }}>
                 <input
                   className="edit-input"
