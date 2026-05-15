@@ -849,6 +849,13 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
             <div className="result-title">{result.projectName}</div>
             <div className="result-meta">
               {result.projectType}{result.projectAddress ? ` · ${result.projectAddress}` : ""} · {result.estimatedDuration} · {(result.scope_trades || []).reduce((n, t) => n + (t.lineItems?.length || 0), 0)} line items / {(result.scope_trades || []).length} trades
+              {(() => {
+                const all = (result.scope_trades || []).flatMap((t) => t.lineItems || []);
+                const done = all.filter((li) => li.completed).length;
+                return all.length > 0 && done > 0
+                  ? <span className="completion-summary">✓ {done} of {all.length} complete</span>
+                  : null;
+              })()}
             </div>
             <div className="result-actions">
               <button className="btn btn-primary" onClick={downloadWord}>⬇ Download Word</button>
@@ -927,8 +934,10 @@ export default function ScopeGPT({ activeProject, onProjectChange }) {
                 />
                 <div className="line-items">
                   {(t.lineItems || []).map((li) => (
-                    <div key={li.id} className={`line-item editable-row ${originClassName(li.origin)}`}>
-                      <span className="line-bullet">▸</span>
+                    <div key={li.id} className={`line-item editable-row ${originClassName(li.origin)} ${li.completed ? "completed" : ""}`}
+                      title={li.completed && li.completed_date ? `Completed ${li.completed_date}` : undefined}
+                    >
+                      <span className="line-bullet">{li.completed ? "✓" : "▸"}</span>
                       <div className="edit-body">
                         <input
                           className="edit-input"
