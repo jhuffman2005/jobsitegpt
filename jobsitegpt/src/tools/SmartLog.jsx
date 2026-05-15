@@ -5,6 +5,10 @@ import {
   saveSmartLog,
   updateSmartLog,
   getUserSettings,
+  getProjectActiveScope,
+  getProjectActiveSchedule,
+  saveActiveScope,
+  saveActiveSchedule,
 } from "../lib/projects";
 import { ProcessingSteps } from "../components/SharedComponents";
 import ProjectSwitcher from "../components/ProjectSwitcher";
@@ -64,6 +68,13 @@ export default function SmartLog({ activeProject, onProjectChange }) {
   const [sending, setSending] = useState(false);
   const [companyName, setCompanyName] = useState("");
 
+  // Cross-reference state (Prompt 5B). Suggestions arrive pre-checked; the
+  // super can uncheck disagreements. Save writes the checked ones back to
+  // projects.scope_trades / schedule_tasks as completed.
+  const [scopeSuggestions, setScopeSuggestions] = useState([]); // [{ id, tradeName, description, checked }]
+  const [scheduleSuggestions, setScheduleSuggestions] = useState([]); // [{ id, task, phase, checked }]
+  const [scheduleNotes, setScheduleNotes] = useState([]); // [string]
+
   useEffect(() => {
     getUserSettings().then((s) => {
       if (s?.company_name) setCompanyName(s.company_name);
@@ -86,6 +97,9 @@ export default function SmartLog({ activeProject, onProjectChange }) {
       safety: { open: false, text: "" },
       inspections: { open: false, text: "" },
     });
+    setScopeSuggestions([]);
+    setScheduleSuggestions([]);
+    setScheduleNotes([]);
   }, [activeProject?.id]);
 
   const toggleQc = (key) =>
@@ -163,6 +177,40 @@ export default function SmartLog({ activeProject, onProjectChange }) {
     setError("");
     const timers = STEPS.map((_, i) => setTimeout(() => setStepIdx(i), i * 1500));
 
+    // Fetch active scope + schedule and flatten incomplete items for the
+    // cross-reference. A fetch failure must NOT block log generation — we
+    // just send empty lists and the suggestions section won't render.
+    let scopeLineItems = [];
+    let scheduleTasksList = [];
+    try {
+      const [activeScope, activeSchedule] = await Promise.all([
+        getProjectActiveScope(activeProject.id),
+        getProjectActiveSchedule(activeProject.id),
+      ]);
+      (activeScope?.scope_trades || []).forEach((trade) => {
+        (trade.lineItems || []).forEach((li) => {
+          if (!li.completed) {
+            scopeLineItems.push({
+              id: li.id,
+              tradeName: trade.tradeName || "",
+              description: li.description || "",
+            });
+          }
+        });
+      });
+      scheduleTasksList = (activeSchedule?.schedule_tasks || [])
+        .filter((t) => !t.completed)
+        .map((t) => ({
+          id: t.id,
+          task: t.task || "",
+          phase: t.phase || "",
+          startDay: Number(t.startDay) || 0,
+          endDay: (Number(t.startDay) || 0) + (Number(t.durationDays) || 1),
+        }));
+    } catch (e) {
+      console.warn("Cross-ref fetch failed (continuing without it):", e);
+    }
+
     try {
       const res = await fetch("/api/smartlog", {
         method: "POST",
@@ -177,11 +225,32 @@ export default function SmartLog({ activeProject, onProjectChange }) {
           visitors: quickChecks.visitors.text,
           safety: quickChecks.safety.text,
           inspections: quickChecks.inspections.text,
+          scope_line_items: scopeLineItems,
+          schedule_tasks: scheduleTasksList,
         }),
       });
       const data = await res.json();
       timers.forEach(clearTimeout);
       if (!res.ok) throw new Error(data.error || "Generation failed");
+
+      // Build pre-checked suggestion rows by intersecting the AI's returned
+      // IDs with the lists we sent. Server already filters hallucinations,
+      // but defending again here is cheap.
+      const scopeIndex = new Map(scopeLineItems.map((s) => [s.id, s]));
+      const schedIndex = new Map(scheduleTasksList.map((s) => [s.id, s]));
+      setScopeSuggestions(
+        (data.suggested_scope_completions || [])
+          .map((id) => scopeIndex.get(id))
+          .filter(Boolean)
+          .map((s) => ({ id: s.id, tradeName: s.tradeName, description: s.description, checked: true }))
+      );
+      setScheduleSuggestions(
+        (data.suggested_schedule_completions || [])
+          .map((id) => schedIndex.get(id))
+          .filter(Boolean)
+          .map((s) => ({ id: s.id, task: s.task, phase: s.phase, checked: true }))
+      );
+      setScheduleNotes(Array.isArray(data.schedule_notes) ? data.schedule_notes : []);
 
       // Persist the log row
       const photoUrls = photos.filter((p) => p.url).map((p) => p.url);
@@ -220,17 +289,105 @@ export default function SmartLog({ activeProject, onProjectChange }) {
     }
   };
 
+  const toggleScopeSuggestion = (id) =>
+    setScopeSuggestions((prev) => prev.map((s) => s.id === id ? { ...s, checked: !s.checked } : s));
+  const toggleScheduleSuggestion = (id) =>
+    setScheduleSuggestions((prev) => prev.map((s) => s.id === id ? { ...s, checked: !s.checked } : s));
+
+  // Save edits to the log text AND write back any checked completion
+  // suggestions to projects.scope_trades / schedule_tasks. The smart_logs
+  // row is already inserted at generate time, so result.smart_log_id is the
+  // value we stamp into completed_by_log_id. Completion writes are
+  // best-effort: if they fail, the log is still saved and we toast a
+  // recoverable error.
   const saveEdits = async () => {
     if (!result?.smart_log_id) return;
     setSaving(true);
+
+    let logSaveError = null;
     try {
       await updateSmartLog(result.smart_log_id, { generated_log: editedLog });
       setResult((r) => ({ ...r, generated_log: editedLog }));
-      showToast("Saved");
     } catch (e) {
-      showToast(`Save failed: ${e.message}`);
-    } finally {
-      setSaving(false);
+      logSaveError = e;
+    }
+
+    const checkedScopeIds = scopeSuggestions.filter((s) => s.checked).map((s) => s.id);
+    const checkedSchedIds = scheduleSuggestions.filter((s) => s.checked).map((s) => s.id);
+    let completionsError = null;
+
+    // Re-fetch the active scope/schedule on save (not the snapshot from
+    // generate time) so we don't stomp any concurrent edits the user made
+    // in ScopeGPT/ScheduleGPT between Generate and Save.
+    if (checkedScopeIds.length > 0) {
+      try {
+        const active = await getProjectActiveScope(activeProject.id);
+        const updatedTrades = (active?.scope_trades || []).map((trade) => ({
+          ...trade,
+          lineItems: (trade.lineItems || []).map((li) =>
+            checkedScopeIds.includes(li.id)
+              ? {
+                  ...li,
+                  completed: true,
+                  completed_date: logDate,
+                  completed_by_log_id: result.smart_log_id,
+                }
+              : li
+          ),
+        }));
+        await saveActiveScope(activeProject.id, {
+          scope_trades: updatedTrades,
+          scope_notes: active?.scope_notes || { generalConditions: [], exclusions: [], clarifications: [] },
+        });
+      } catch (e) {
+        console.warn("Scope completion write failed:", e);
+        completionsError = e;
+      }
+    }
+
+    if (checkedSchedIds.length > 0) {
+      try {
+        const active = await getProjectActiveSchedule(activeProject.id);
+        const updatedTasks = (active?.schedule_tasks || []).map((t) =>
+          checkedSchedIds.includes(t.id)
+            ? {
+                ...t,
+                completed: true,
+                completed_date: logDate,
+                completed_by_log_id: result.smart_log_id,
+              }
+            : t
+        );
+        await saveActiveSchedule(activeProject.id, {
+          schedule_tasks: updatedTasks,
+          schedule_phases: active?.schedule_phases || [],
+          schedule_subcontractors: active?.schedule_subcontractors || [],
+        });
+      } catch (e) {
+        console.warn("Schedule completion write failed:", e);
+        completionsError = e;
+      }
+    }
+
+    setSaving(false);
+
+    if (logSaveError) {
+      showToast(`Save failed: ${logSaveError.message}`);
+      return;
+    }
+    if (completionsError) {
+      showToast("Log saved, but completion updates failed — you can check items off manually in Scope/Schedule");
+      return;
+    }
+    const checkedTotal = checkedScopeIds.length + checkedSchedIds.length;
+    if (checkedTotal > 0) {
+      showToast(`Saved · ${checkedTotal} item${checkedTotal === 1 ? "" : "s"} marked complete`);
+      // Items are no longer suggestions once completed — clear the section.
+      setScopeSuggestions([]);
+      setScheduleSuggestions([]);
+      setScheduleNotes([]);
+    } else {
+      showToast("Saved");
     }
   };
 
@@ -325,6 +482,9 @@ export default function SmartLog({ activeProject, onProjectChange }) {
       safety: { open: false, text: "" },
       inspections: { open: false, text: "" },
     });
+    setScopeSuggestions([]);
+    setScheduleSuggestions([]);
+    setScheduleNotes([]);
     setError("");
   };
 
@@ -542,6 +702,66 @@ export default function SmartLog({ activeProject, onProjectChange }) {
               Edit anything you'd like to fix, then hit Save Log.
             </div>
           </div>
+
+          {(scopeSuggestions.length > 0 || scheduleSuggestions.length > 0) && (
+            <div className="suggested-completions">
+              <div className="suggested-completions-title">
+                Suggested Completions
+              </div>
+              <div style={{ fontSize: 12, color: "#606880", marginBottom: 8, lineHeight: 1.5 }}>
+                Based on today's note, these items look like they were worked on. Uncheck anything you don't want to mark complete. Saving the log marks the checked ones done.
+              </div>
+
+              {scopeSuggestions.length > 0 && (
+                <>
+                  <div className="suggested-completions-sub">📋 Scope items worked on today</div>
+                  {scopeSuggestions.map((s) => (
+                    <label key={s.id} className="suggested-completions-row">
+                      <input
+                        type="checkbox"
+                        checked={s.checked}
+                        onChange={() => toggleScopeSuggestion(s.id)}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>{s.description || "(no description)"}</div>
+                        {s.tradeName && (
+                          <div className="suggested-completions-meta">{s.tradeName}</div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </>
+              )}
+
+              {scheduleSuggestions.length > 0 && (
+                <>
+                  <div className="suggested-completions-sub">📅 Schedule tasks progressed today</div>
+                  {scheduleSuggestions.map((s) => (
+                    <label key={s.id} className="suggested-completions-row">
+                      <input
+                        type="checkbox"
+                        checked={s.checked}
+                        onChange={() => toggleScheduleSuggestion(s.id)}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>{s.task || "(no task name)"}</div>
+                        {s.phase && (
+                          <div className="suggested-completions-meta">{s.phase}</div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                  {scheduleNotes.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      {scheduleNotes.map((n, i) => (
+                        <div key={i} className="suggested-completions-note">⚠ {n}</div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {result.photos?.length > 0 && (
             <>

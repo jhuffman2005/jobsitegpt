@@ -748,7 +748,15 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
             <div className="stat-card">
               <div className="stat-label">Total Tasks</div>
               <div className="stat-value">{(result.schedule_tasks || []).length}</div>
-              <div className="stat-sub">across {(result.schedule_phases || []).length} phases</div>
+              <div className="stat-sub">
+                {(() => {
+                  const done = (result.schedule_tasks || []).filter((t) => t.completed).length;
+                  const total = (result.schedule_tasks || []).length;
+                  return total > 0 && done > 0
+                    ? <>✓ {done} of {total} complete · across {(result.schedule_phases || []).length} phases</>
+                    : <>across {(result.schedule_phases || []).length} phases</>;
+                })()}
+              </div>
             </div>
             <div className="stat-card">
               <div className="stat-label">Trades</div>
@@ -785,7 +793,11 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                 {(result.schedule_tasks || []).map((t, idx) => {
                   const pc = phaseMap[t.phase] || PHASE_COLORS[0];
                   return (
-                    <tr key={t.id} className={originClassName(t.origin) || undefined}>
+                    <tr
+                      key={t.id}
+                      className={[originClassName(t.origin), t.completed ? "completed" : ""].filter(Boolean).join(" ") || undefined}
+                      title={t.completed && t.completed_date ? `Completed ${t.completed_date}` : undefined}
+                    >
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{idx + 1}</td>
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}

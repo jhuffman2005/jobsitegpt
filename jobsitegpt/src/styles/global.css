@@ -634,6 +634,65 @@ select {
 .tool-readonly .row-delete-cell { display: none !important; }
 .tool-readonly select.edit-input { appearance: none; -webkit-appearance: none; padding-right: 5px; }
 
+/* SmartLog cross-reference: "Suggested Completions" section rendered
+   between the generated log and the Save button. Each row is a pre-checked
+   checkbox the super can uncheck before saving. Saving marks checked items
+   complete on projects.scope_trades / schedule_tasks. */
+.suggested-completions {
+  background: #f8f9fc;
+  border: 1px solid #e0e4ef;
+  border-left: 3px solid #4a90e2;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 22px;
+}
+.suggested-completions-title {
+  font-family: 'Inter', sans-serif; font-weight: 700; font-size: 14px;
+  color: #1a1f2e; margin-bottom: 4px;
+}
+.suggested-completions-sub {
+  font-family: 'Inter', sans-serif; font-weight: 700; font-size: 11px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: #606880;
+  margin: 14px 0 6px;
+}
+.suggested-completions-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 8px 4px;
+  font-size: 13px; color: #1a1f2e; line-height: 1.5;
+  border-bottom: 1px solid #eef0f5;
+  cursor: pointer;
+}
+.suggested-completions-row:last-of-type { border-bottom: none; }
+.suggested-completions-row input[type="checkbox"] {
+  width: 16px; height: 16px; margin-top: 2px;
+  accent-color: #f0a500; cursor: pointer; flex-shrink: 0;
+}
+.suggested-completions-meta {
+  font-size: 11px; color: #909ab0; margin-top: 2px;
+  font-family: 'Inter', sans-serif;
+}
+.suggested-completions-note {
+  font-size: 12px; color: #c47f00; font-style: italic;
+  padding: 4px 0; line-height: 1.5;
+}
+
+/* Completed-item treatment in ScopeGPT (line items) and ScheduleGPT
+   (table rows). Strikethrough + dim, plus a green checkmark accent.
+   Items stay visible so the GC can see what's done at a glance. */
+.line-item.completed .edit-input,
+.line-item.completed .edit-body { opacity: 0.5; }
+.line-item.completed .edit-input { text-decoration: line-through; }
+.line-item.completed .line-bullet { color: #27ae60; opacity: 1; }
+.gantt-table tr.completed .edit-input { text-decoration: line-through; opacity: 0.55; }
+.gantt-table tr.completed > td:first-child {
+  position: relative; color: #27ae60; font-weight: 700;
+}
+.completion-summary {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: #27ae60; font-family: 'Inter', sans-serif;
+  margin-left: 8px;
+}
+
 /* Origin accents. Three states; box-shadow inset to avoid layout shift.
      ai_generated → no class, no accent
      user_added   → blue
