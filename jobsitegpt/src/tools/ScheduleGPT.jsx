@@ -145,6 +145,9 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   const [draft, setDraft] = useState(null); // { id, field, value }
   const [movedId, setMovedId] = useState(null);
   const movedTimer = useRef(null);
+  // Set synchronously by Escape so the blur it triggers skips the commit
+  // (setDraft(null) is async and wouldn't be visible to the blur handler yet).
+  const cancelEditRef = useRef(false);
   useEffect(() => () => { if (movedTimer.current) clearTimeout(movedTimer.current); }, []);
 
   // Lock state: mirrors projects.schedule_locked.
@@ -555,6 +558,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     (draft && draft.id === id && draft.field === field) ? draft.value : fallback;
   const onCellChange = (id, field, value) => setDraft({ id, field, value });
   const onCellCommit = (id, field) => {
+    if (cancelEditRef.current) { cancelEditRef.current = false; setDraft(null); return; }
     if (!draft || draft.id !== id || draft.field !== field) return;
     const value = draft.value;
     setDraft(null);
@@ -569,7 +573,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
   };
   const onCellKeyDown = (e) => {
     if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
-    else if (e.key === "Escape") { setDraft(null); e.currentTarget.blur(); }
+    else if (e.key === "Escape") { e.preventDefault(); cancelEditRef.current = true; setDraft(null); e.currentTarget.blur(); }
   };
 
   const updateSub = (idx, field, value) =>
