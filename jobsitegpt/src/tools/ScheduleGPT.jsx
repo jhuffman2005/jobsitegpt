@@ -83,21 +83,21 @@ function computeTotalDays(tasks) {
 }
 
 // Order tasks for display: by phase order, then by startDay within a phase,
-// then by original array position as a stable final tiebreaker (tasks sharing
-// a startDay keep the AI's / insertion order). This is what keeps added and
-// edited tasks sitting in the correct chronological slot instead of jumping to
-// the top. Tasks whose phase isn't in the phases array sink to the bottom
-// (still grouped with each other, still startDay-ordered).
+// then alphabetically by task name as the tiebreaker for identical startDays.
+// This is what keeps added and edited tasks sitting in the correct
+// chronological slot instead of jumping to wherever they landed in the array.
+// Tasks whose phase isn't in the phases array sink to the bottom (still
+// grouped with each other, still startDay-ordered).
 function sortTasksByPhase(tasks, phases) {
   const order = new Map((phases || []).map((p, i) => [p, i]));
   return tasks
-    .map((t, i) => ({
+    .map((t) => ({
       t,
-      i,
       p: order.has(t.phase) ? order.get(t.phase) : Number.MAX_SAFE_INTEGER,
       d: Number(t.startDay) || 0,
+      n: String(t.task ?? ""),
     }))
-    .sort((a, b) => (a.p - b.p) || (a.d - b.d) || (a.i - b.i))
+    .sort((a, b) => (a.p - b.p) || (a.d - b.d) || a.n.localeCompare(b.n))
     .map((x) => x.t);
 }
 
