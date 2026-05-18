@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { callClaude, downloadTxt, checkPayloadSize } from "../lib/api";
 import { useFiles, useToast } from "../lib/hooks";
@@ -136,6 +136,16 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
 
   const [selectedPF, setSelectedPF] = useState([]);
   const [loadingPF, setLoadingPF] = useState(new Set());
+
+  // Inline editing: typing only updates this local draft (no cascade, no
+  // re-sort, no save) so the row stays put while you type. The edit is
+  // committed — cascade → sort → save — on blur or Enter. movedId briefly
+  // flashes whichever row a commit just touched so you can track where it
+  // landed after the list re-sorts.
+  const [draft, setDraft] = useState(null); // { id, field, value }
+  const [movedId, setMovedId] = useState(null);
+  const movedTimer = useRef(null);
+  useEffect(() => () => { if (movedTimer.current) clearTimeout(movedTimer.current); }, []);
 
   // Lock state: mirrors projects.schedule_locked.
   const [locked, setLocked] = useState(false);
@@ -535,6 +545,33 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     updateTask(taskId, "dependencies", uuids);
   };
 
+  // ── Inline edit: draft while typing, commit on blur/Enter ────────────────
+  const flashRow = (id) => {
+    setMovedId(id);
+    if (movedTimer.current) clearTimeout(movedTimer.current);
+    movedTimer.current = setTimeout(() => setMovedId(null), 1000);
+  };
+  const draftVal = (id, field, fallback) =>
+    (draft && draft.id === id && draft.field === field) ? draft.value : fallback;
+  const onCellChange = (id, field, value) => setDraft({ id, field, value });
+  const onCellCommit = (id, field) => {
+    if (!draft || draft.id !== id || draft.field !== field) return;
+    const value = draft.value;
+    setDraft(null);
+    if (field === "dependencies") {
+      updateTaskDependencies(id, value);
+    } else if (field === "startDay" || field === "durationDays") {
+      updateTask(id, field, Math.max(1, Math.floor(Number(value)) || 1));
+    } else {
+      updateTask(id, field, value);
+    }
+    flashRow(id);
+  };
+  const onCellKeyDown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+    else if (e.key === "Escape") { setDraft(null); e.currentTarget.blur(); }
+  };
+
   const updateSub = (idx, field, value) =>
     updateResult((r) => ({ ...r, schedule_subcontractors: (r.schedule_subcontractors || []).map((s, i) => i === idx ? { ...s, [field]: value } : s) }));
   const deleteSub = (idx) =>
@@ -804,14 +841,16 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                   return (
                     <tr
                       key={t.id}
-                      className={[originClassName(t.origin), t.completed ? "completed" : ""].filter(Boolean).join(" ") || undefined}
+                      className={[originClassName(t.origin), t.completed ? "completed" : "", t.id === movedId ? "row-moved" : ""].filter(Boolean).join(" ") || undefined}
                       title={t.completed && t.completed_date ? `Completed ${t.completed_date}` : undefined}
                     >
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, color: "#c0c8d8", width: 44 }}>{idx + 1}</td>
                       <td>
                         <input className="edit-input" style={{ fontWeight: 600, fontSize: 12 }}
-                          value={t.task}
-                          onChange={(e) => updateTask(t.id, "task", e.target.value)}
+                          value={draftVal(t.id, "task", t.task)}
+                          onChange={(e) => onCellChange(t.id, "task", e.target.value)}
+                          onBlur={() => onCellCommit(t.id, "task")}
+                          onKeyDown={onCellKeyDown}
                           readOnly={inHistoryMode} />
                       </td>
                       <td style={{ minWidth: 110 }}>
@@ -819,7 +858,7 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                           className="edit-input"
                           style={{ background: pc.bg, color: pc.color, fontSize: 11, padding: "3px 5px", border: "1px solid transparent", borderRadius: 4 }}
                           value={t.phase}
-                          onChange={(e) => updateTask(t.id, "phase", e.target.value)}
+                          onChange={(e) => { updateTask(t.id, "phase", e.target.value); flashRow(t.id); }}
                           disabled={inHistoryMode}
                         >
                           {(result.schedule_phases || []).map((p) => <option key={p} value={p}>{p}</option>)}
@@ -827,26 +866,34 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
                       </td>
                       <td style={{ color: "#606880", minWidth: 100 }}>
                         <input className="edit-input" style={{ fontSize: 12, color: "#606880" }}
-                          value={t.trade}
-                          onChange={(e) => updateTask(t.id, "trade", e.target.value)}
+                          value={draftVal(t.id, "trade", t.trade)}
+                          onChange={(e) => onCellChange(t.id, "trade", e.target.value)}
+                          onBlur={() => onCellCommit(t.id, "trade")}
+                          onKeyDown={onCellKeyDown}
                           readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 80 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 60 }} type="number" min="1"
-                          value={t.startDay}
-                          onChange={(e) => updateTask(t.id, "startDay", Number(e.target.value) || 1)}
+                          value={draftVal(t.id, "startDay", t.startDay)}
+                          onChange={(e) => onCellChange(t.id, "startDay", e.target.value)}
+                          onBlur={() => onCellCommit(t.id, "startDay")}
+                          onKeyDown={onCellKeyDown}
                           readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 11, width: 70 }}>
                         <input className="edit-input" style={{ fontSize: 11, width: 50 }} type="number" min="1"
-                          value={t.durationDays}
-                          onChange={(e) => updateTask(t.id, "durationDays", Number(e.target.value) || 1)}
+                          value={draftVal(t.id, "durationDays", t.durationDays)}
+                          onChange={(e) => onCellChange(t.id, "durationDays", e.target.value)}
+                          onBlur={() => onCellCommit(t.id, "durationDays")}
+                          onKeyDown={onCellKeyDown}
                           readOnly={inHistoryMode} />
                       </td>
                       <td style={{ fontFamily: "'Inter',sans-serif", fontSize: 10, color: "#c0c8d8", minWidth: 90 }}>
                         <input className="edit-input" style={{ fontSize: 10, color: "#606880" }}
-                          value={(t.dependencies || []).map((d) => idToOrdinal.get(d)).filter(Boolean).join(", ")}
-                          onChange={(e) => updateTaskDependencies(t.id, e.target.value)}
+                          value={draftVal(t.id, "dependencies", (t.dependencies || []).map((d) => idToOrdinal.get(d)).filter(Boolean).join(", "))}
+                          onChange={(e) => onCellChange(t.id, "dependencies", e.target.value)}
+                          onBlur={() => onCellCommit(t.id, "dependencies")}
+                          onKeyDown={onCellKeyDown}
                           placeholder="e.g. 1, 2"
                           readOnly={inHistoryMode} />
                       </td>

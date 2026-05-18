@@ -708,6 +708,14 @@ select {
 .gantt-table tr.uploaded > td:first-child,
 .gantt-table tr.uploaded > td:first-child + td { box-shadow: inset 3px 0 0 #27ae60; }
 
+/* Brief flash on a row that a commit just touched, so the user can track
+   where it landed after the list re-sorts. */
+@keyframes rowMovedFlash {
+  0%   { background: rgba(240, 165, 0, 0.35); }
+  100% { background: transparent; }
+}
+.gantt-table tr.row-moved td { animation: rowMovedFlash 1s ease-out; }
+
 /* Scope/Schedule upload card (project setup). Subdued styling — sidecar,
    not the primary path. Lives in ProjectDetail.jsx via ScopeOrScheduleUpload. */
 .upload-import-card {
