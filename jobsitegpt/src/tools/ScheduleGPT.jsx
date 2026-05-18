@@ -82,16 +82,22 @@ function computeTotalDays(tasks) {
   }, 0);
 }
 
-// Group tasks by phase order so newly-added tasks (and tasks whose phase was
-// just edited) sit with their siblings instead of dangling at the end of the
-// list. Stable secondary sort preserves the original order within each phase
-// — the AI's intra-phase ordering survives. Tasks whose phase isn't in the
-// phases array sink to the bottom (still grouped with each other).
+// Order tasks for display: by phase order, then by startDay within a phase,
+// then alphabetically by task name as the tiebreaker for identical startDays.
+// This is what keeps added and edited tasks sitting in the correct
+// chronological slot instead of jumping to wherever they landed in the array.
+// Tasks whose phase isn't in the phases array sink to the bottom (still
+// grouped with each other, still startDay-ordered).
 function sortTasksByPhase(tasks, phases) {
   const order = new Map((phases || []).map((p, i) => [p, i]));
   return tasks
-    .map((t, i) => ({ t, i, p: order.has(t.phase) ? order.get(t.phase) : Number.MAX_SAFE_INTEGER }))
-    .sort((a, b) => (a.p - b.p) || (a.i - b.i))
+    .map((t) => ({
+      t,
+      p: order.has(t.phase) ? order.get(t.phase) : Number.MAX_SAFE_INTEGER,
+      d: Number(t.startDay) || 0,
+      n: String(t.task ?? ""),
+    }))
+    .sort((a, b) => (a.p - b.p) || (a.d - b.d) || a.n.localeCompare(b.n))
     .map((x) => x.t);
 }
 
@@ -481,10 +487,13 @@ export default function ScheduleGPT({ activeProject, onProjectChange }) {
     try { return new Date(historyMeta.createdAt).toLocaleString(); } catch { return ""; }
   }, [historyMeta]);
 
+  // Apply edit → cascade dependent startDays → sort on the final startDays →
+  // save. Cascade runs before the sort so downstream shifts are reflected in
+  // the displayed order. One round of sorting per change.
   const applyTaskChange = (r, nextTasks) => {
-    const sorted = sortTasksByPhase(nextTasks, r.schedule_phases || []);
-    const cascaded = cascadeSchedule(sorted);
-    return { ...r, schedule_tasks: cascaded, totalDays: computeTotalDays(cascaded) };
+    const cascaded = cascadeSchedule(nextTasks);
+    const sorted = sortTasksByPhase(cascaded, r.schedule_phases || []);
+    return { ...r, schedule_tasks: sorted, totalDays: computeTotalDays(sorted) };
   };
 
   const updateTask = (taskId, field, value) =>
